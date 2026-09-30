@@ -1,0 +1,46 @@
+# Expanded Inventory - settings
+# Change them in Esc > MODS if you use Mod Menu, or edit this file with the game closed.
+
+# ---- Inventory size (restart the game after a change) ----
+# Main bag slots: 24 to 152, in steps of 8. Vanilla is 24.
+BagSlots = 152
+
+# Runes and ammo tab slots: 24 to 72, in steps of 8. Vanilla is 24. The quest tab keeps its vanilla 72.
+TabSlots = 24
+
+# EXISTING CHARACTER: before the first start with a bigger size (and before every later increase),
+# move everything from the Runes, Ammo and Quest tabs into a chest. Start the game, then take it back.
+# The inventory is saved slot by slot; a bigger bag moves where those tabs start.
+# Never lower a size on a character you play: items in the removed slots are lost.
+# Updating from 1.x: keep your old "InventorySlots = N" line and do not add BagSlots/TabSlots,
+# and nothing changes. To switch to the new sizes, empty the three tabs into a chest first.
+
+# true = hide the inventory scroll bar that can stay visible after the inventory is closed
+HideScrollBar = true
+
+# ---- Bag first ----
+# true = picked-up items go into your bag instead of filling empty hotbar slots.
+# Stacks already on the hotbar still grow. In co-op the host's setting decides.
+BagFirst = true
+
+# ---- Auto tool ----
+# true = hit a rock, tree or farm plot with the wrong item (left click) and the right tool comes out
+# of your bag: pickaxe, axe, spade, watering can or compost bucket. Works from empty hands, a torch
+# or another tool. Never from a bow, crossbow, staff, wand, seeds or potions.
+AutoTool = true
+
+# true = also swap away from a melee weapon (sword, dagger, mace...), but only for a rock or tree
+# right in front of you (2 m) or the one the game is pointing at, so fights are not disturbed.
+AutoToolFromWeapon = true
+
+# ---- Tool key ----
+# Face a rock, tree, farm plot or fishing spot and press this key: the best pickaxe, axe, spade,
+# watering can, compost bucket, fishing rod or net comes out of your bag. "none" turns it off.
+# Letters, F1-F12 and NUM_ZERO..NUM_NINE work. Restart the game after changing the key.
+ToolKey = U
+
+# How close a rock or tree must be, in meters (it must also be in front of you). 1.5 to 6.
+ToolReach = 3.0
+
+# Farm plots: also take out the compost bucket once a plot is watered.
+UseCompost = true
