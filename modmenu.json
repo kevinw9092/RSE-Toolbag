@@ -1,104 +1,31 @@
 {
   "schema": 1,
-  "id": "ExpandedInventory",
-  "name": "Expanded Inventory",
-  "author": "OMRAR",
-  "version": "1.3.0",
-  "description": "Main bag up to 152 slots (runes and ammo tabs optional), pickups go to the bag first, the right tool comes out when you hit a rock, tree or farm plot, and one key for tools. Existing characters: empty the runes, ammo and quest tabs into a chest before changing the size.",
+  "id": "RSE-Toolbag",
+  "name": "RSE-Toolbag",
+  "author": "notto0606, RSE contributors",
+  "version": "2.0.0",
+  "description": "A 10-slot toolbag beside the inventory (needs RSE-Dock). Shift+1-0 equips a slot, and the tool key takes out the right tool for what you face. Empty the toolbag before removing the mod.",
   "settings": [
-    {
-      "type": "header",
-      "label": "Inventory"
-    },
-    {
-      "key": "BagSlots",
-      "type": "slider",
-      "label": "Main bag slots",
-      "min": 24,
-      "max": 152,
-      "step": 8,
-      "default": 152,
-      "restart": true,
-      "tooltip": "Slots in the main bag (vanilla 24). Before raising it on an existing character, move everything from the Runes, Ammo and Quest tabs into a chest. Never lower it on a character you play."
-    },
-    {
-      "key": "TabSlots",
-      "type": "slider",
-      "label": "Runes and ammo slots",
-      "min": 24,
-      "max": 72,
-      "step": 8,
-      "default": 24,
-      "restart": true,
-      "tooltip": "Slots in the Runes and Ammo tabs (vanilla 24). The quest tab stays at its vanilla 72. Same rule: empty the Runes, Ammo and Quest tabs into a chest before raising it, never lower it."
-    },
-    {
-      "key": "HideScrollBar",
-      "type": "toggle",
-      "label": "Hide inventory scroll bar",
-      "default": true,
-      "restart": true,
-      "tooltip": "Hides the inventory scroll bar that can stay visible after the inventory is closed."
-    },
-    {
-      "type": "header",
-      "label": "Pickups"
-    },
-    {
-      "key": "BagFirst",
-      "type": "toggle",
-      "label": "Bag first",
-      "default": true,
-      "tooltip": "Picked-up items go into your bag instead of filling empty hotbar slots. Stacks already on the hotbar still grow. In co-op the host's setting decides."
-    },
-    {
-      "type": "header",
-      "label": "Auto tool"
-    },
-    {
-      "key": "AutoTool",
-      "type": "toggle",
-      "label": "Auto tool on hit",
-      "default": true,
-      "tooltip": "Hit a rock, tree or farm plot with the wrong item and the right tool comes out of your bag. Never from a bow, crossbow, staff, wand, seeds or potions."
-    },
-    {
-      "key": "AutoToolFromWeapon",
-      "type": "toggle",
-      "label": "Also from melee weapons",
-      "default": true,
-      "tooltip": "Also swap away from a sword, dagger, mace and other melee weapons, but only for a rock or tree right in front of you, so fights are not disturbed."
-    },
-    {
-      "type": "header",
-      "label": "Tool key"
-    },
-    {
-      "key": "ToolKey",
-      "type": "key",
-      "label": "Tool key",
-      "default": "U",
-      "restart": true,
-      "tooltip": "Face a rock, tree, farm plot or fishing spot and press it: the best tool for it comes out of your bag. Pick None to turn it off."
-    },
-    {
-      "key": "ToolReach",
-      "type": "slider",
-      "label": "Rock and tree reach",
-      "min": 1.5,
-      "max": 6,
-      "step": 0.5,
-      "decimals": 1,
-      "suffix": " m",
-      "default": 3,
-      "tooltip": "How close a rock or tree must be, in front of you."
-    },
-    {
-      "key": "UseCompost",
-      "type": "toggle",
-      "label": "Compost bucket for watered plots",
-      "default": true,
-      "tooltip": "On a watered farm plot the key takes out the compost bucket. Off: a watered plot gets no tool."
-    }
+    { "type": "header", "label": "Keys" },
+    { "key": "SlotKeys", "type": "choice", "label": "Toolbag slot keys", "options": ["SHIFT", "CTRL", "ALT", "NONE"], "default": "SHIFT", "restart": true,
+      "tooltip": "Hold this and press 1-0 to equip toolbag slot 1-10. NONE turns the keys off." },
+    { "key": "ToolKey", "type": "key", "label": "Tool key", "default": "X", "restart": true,
+      "tooltip": "Face a rock, tree, farm plot or fishing spot and press it: the best tool comes out, toolbag first. Pick None to turn it off." },
+    { "key": "EquipPrompt", "type": "toggle", "label": "Show equip prompt", "default": true,
+      "tooltip": "Shows \"[key] Equip <tool>\" while you face something a tool you carry can work on." },
+    { "key": "ToolReach", "type": "slider", "label": "Rock and tree reach", "min": 1.5, "max": 6, "step": 0.5, "decimals": 1, "suffix": " m", "default": 3,
+      "tooltip": "How close a rock or tree must be, in front of you." },
+    { "key": "UseCompost", "type": "toggle", "label": "Compost bucket for watered plots", "default": true,
+      "tooltip": "On a watered farm plot the key takes out the compost bucket." },
+    { "type": "header", "label": "Auto tool" },
+    { "key": "AutoTool", "type": "toggle", "label": "Auto tool on hit", "default": true,
+      "tooltip": "Hit a rock, tree or farm plot with the wrong item and the right tool comes out. Never from a bow, crossbow, staff, wand, seeds or potions." },
+    { "key": "AutoToolFromWeapon", "type": "toggle", "label": "Also from melee weapons", "default": true,
+      "tooltip": "Also swap away from melee weapons, but only for a rock or tree right in front of you." },
+    { "type": "header", "label": "Other" },
+    { "key": "BagFirst", "type": "toggle", "label": "Pickups go to the bag first", "default": false,
+      "tooltip": "Picked-up items go into your bag instead of filling empty hotbar slots. In co-op the host's setting decides." },
+    { "key": "Debug", "type": "toggle", "label": "Debug log", "default": false,
+      "tooltip": "Extra lines in ue4ss\UE4SS.log." }
   ]
 }
