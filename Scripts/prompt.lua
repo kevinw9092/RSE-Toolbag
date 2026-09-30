@@ -6,9 +6,8 @@ local T = require('toolbag_core')
 
 local P = {}
 local WIDTH, HEIGHT = 420, 76
--- Text size: 18 was taller than the panel's content area and the bottom of the
--- letters was cut off. 14 fits with a small margin; the text is also centred
--- vertically (and horizontally) in the panel.
+-- Text size (was 18). The cut-off letters were the panel's content slot, not
+-- the size: the text now sits on the panel's root layer (see build).
 local FONT_SIZE = 14
 local H_CENTER, V_CENTER = 2, 2
 local HIT_TEST_INVISIBLE, COLLAPSED = 3, 1
@@ -27,6 +26,41 @@ local function loadClass(pkg)
     return valid(c) and c or nil
 end
 
+-- The game's panel plays its own effects (rising embers, flourishes), made for
+-- big windows; on a small hint they look like stray sparks. Hides every
+-- effect widget in the panel: Niagara/particle widgets by class, and anything
+-- whose class or name says ember, spark, particle, flourish or FX. With Debug
+-- on, every widget seen is logged once so a missed one can be named.
+local EFFECT = { 'niagara', 'particle', 'ember', 'spark', 'flourish', 'vfx', 'fx_', '_fx' }
+local function isEffect(w)
+    local cls = (get(function() return w:GetClass():GetFName():ToString() end) or ''):lower()
+    local nm = (get(function() return w:GetFName():ToString() end) or ''):lower()
+    for _, key in ipairs(EFFECT) do
+        if cls:find(key, 1, true) or nm:find(key, 1, true) then return true, cls, nm end
+    end
+    return false, cls, nm
+end
+local function hideEffects(frame, root)
+    local seen, hidden = {}, 0
+    local function walk(w, depth)
+        if not valid(w) or depth > 12 then return end
+        local effect, cls, nm = isEffect(w)
+        seen[#seen + 1] = string.rep(' ', depth) .. nm .. ':' .. cls
+        if effect then
+            if pcall(function() w:SetVisibility(COLLAPSED) end) then hidden = hidden + 1 end
+            return
+        end
+        local n = get(function() return w:GetChildrenCount() end)
+        if type(n) == 'number' then
+            for i = 0, n - 1 do walk(get(function() return w:GetChildAt(i) end), depth + 1) end
+        end
+        local inner = get(function() return w.WidgetTree.RootWidget end)
+        if valid(inner) and inner ~= w then walk(inner, depth + 1) end
+    end
+    walk(root, 0)
+    T.debugLog('equip prompt: ' .. hidden .. ' effect widget(s) hidden; panel widgets: ' .. table.concat(seen, ', '))
+end
+
 local function build(pc)
     local panelC = loadClass('/Game/UI/Panels/WBP_Panel')
     local textC = loadClass('/Game/UI/Common/WBP_DomTextBlock')
@@ -38,21 +72,46 @@ local function build(pc)
     pcall(function() local f = text.Font; f.Size = FONT_SIZE; text:SetFont(f) end)
     pcall(function() text:SetColorAndOpacity({ SpecifiedColor = GOLD, ColorUseRule = 0 }) end)
     pcall(function() text:SetJustification(1) end) -- 1 = centre
-    -- Centred in the panel through an invisible Border (the panel's content
-    -- slot cannot align its child); the text goes in directly if that fails.
-    local placed = pcall(function()
-        local box = StaticConstructObject(StaticFindObject('/Script/UMG.Border'), frame.WidgetTree)
-        box:SetBrushColor({ R = 0, G = 0, B = 0, A = 0 })
-        box:SetPadding({ Left = 12, Top = 2, Right = 12, Bottom = 2 })
-        box:SetHorizontalAlignment(H_CENTER)
-        box:SetVerticalAlignment(V_CENTER)
-        box:SetContent(text)
-        frame.PanelContent:AddChild(box)
-    end)
-    if not placed then
+    -- Centred through an invisible Border. The panel's content slot sits
+    -- inside the frame art's thick padding and is shorter than a line of
+    -- text at this panel height, which cut the letters off at any font size
+    -- (2.2.4). So the Border goes on the panel's root layer, over the whole
+    -- frame; the content slot is only the fallback.
+    local box = StaticConstructObject(StaticFindObject('/Script/UMG.Border'), frame.WidgetTree)
+    box:SetBrushColor({ R = 0, G = 0, B = 0, A = 0 })
+    box:SetPadding({ Left = 12, Top = 0, Right = 12, Bottom = 0 })
+    box:SetHorizontalAlignment(H_CENTER)
+    box:SetVerticalAlignment(V_CENTER)
+    pcall(function() box:SetClipping(0) end)
+    box:SetContent(text)
+    local root = get(function() return frame.WidgetTree.RootWidget end)
+    local rootClass = valid(root) and (get(function() return root:GetClass():GetFName():ToString() end) or '?') or 'none'
+    local where
+    if valid(root) and get(function() return root:IsA('/Script/UMG.Overlay') end) then
+        where = pcall(function()
+            local slot = root:AddChildToOverlay(box)
+            slot:SetHorizontalAlignment(0) -- fill
+            slot:SetVerticalAlignment(0)
+        end) and 'root overlay' or nil
+    elseif valid(root) and get(function() return root:IsA('/Script/UMG.CanvasPanel') end) then
+        where = pcall(function()
+            local slot = root:AddChildToCanvas(box)
+            slot:SetAnchors({ Minimum = { X = 0, Y = 0 }, Maximum = { X = 1, Y = 1 } })
+            slot:SetOffsets({ Left = 0, Top = 0, Right = 0, Bottom = 0 })
+            slot:SetZOrder(100)
+        end) and 'root canvas' or nil
+    end
+    if not where then
+        pcall(function() box:RemoveFromParent() end)
+        where = pcall(function() frame.PanelContent:AddChild(box) end) and 'panel content' or nil
+    end
+    if not where then
         pcall(function() text:RemoveFromParent() end)
         frame.PanelContent:AddChild(text)
+        where = 'panel content, uncentred'
     end
+    T.debugLog('equip prompt text placed in the ' .. where .. ' (panel root: ' .. rootClass .. ')')
+    hideEffects(frame, root)
     frame:AddToViewport(50)
     frame:SetVisibility(COLLAPSED)
     -- Bottom centre, above the health and stamina bars.

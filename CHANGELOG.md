@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.2.5
+- **Equip prompt text no longer cut off.** The smaller font in 2.2.4 did not help. The panel's content area sits inside the frame art's padding and is shorter than a line of text. The text now sits over the whole panel, centred. The old placement is the fallback.
+- **No stray sparks around the prompt.** The game's panel plays ember and flourish effects meant for large windows. The prompt now hides them. With Debug on, the panel's widgets are logged once, so a missed effect can be named.
+
 ## 2.2.4
 - **Fixed a crash risk from stale cached game objects after the game unloaded them.** The same bug crashed RSE-Transmog. The toolbag window kept item icons, fonts, the game button class and the inventory slots used for its slot art between uses. The tool list kept item data objects. The game can unload those, and the next use would then touch freed memory. The mod now keeps only names and paths, and looks each object up again when it needs it. The icon cache is also cleared on every map load.
 - **Equip prompt text fits its frame.** The "[X] Equip ..." prompt used text too large for its panel, which cut off the bottom of the letters. The text is now smaller (14 instead of 18) and centred in the panel.
