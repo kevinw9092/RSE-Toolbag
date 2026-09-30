@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.2.3
+- The toolbag slots now look like the inventory's empty slots: a slightly darker square over the window's own grain, with no framed slot art. The game's empty slots draw no texture of their own; every slot brush is empty, as `transmog_slotart` showed.
+
 ## 2.2.2
 - **Slots match the inventory's empty slots.** The toolbag and bag squares now copy what an empty inventory slot draws (plain dark with a faint grain) instead of the item slot frame. If no empty inventory slot is found (full bag), they fall back to the frame, then to flat dark.
 - **Quieter log.** With `Debug = false` (the default), the log only shows the version line, errors and warnings. Setup details (toolbag tab, keys bound, move function, co-op handshake, bag first, slot art) and move status lines need `Debug = true`. Debug can be switched in game with RSE-ModMenu and applies at once.

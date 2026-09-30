@@ -31,6 +31,7 @@ local COLOR = {
     -- Slots: the game's slot art underneath (see copySlotArt); `slot` only if
     -- that cannot be copied. Hover and selection are drawn over it.
     slot         = { R = 0.040, G = 0.036, B = 0.031, A = 0.92 },
+    emptySlot    = { R = 0, G = 0, B = 0, A = 0.22 }, -- the inventory's empty slot over the panel texture
     slotHover    = { R = 0.150, G = 0.120, B = 0.075, A = 0.45 },
     slotSelected = { R = 0.190, G = 0.145, B = 0.070, A = 0.95 },
     hoverEdge    = { R = 0.520, G = 0.420, B = 0.240, A = 1 },
@@ -302,6 +303,15 @@ end
 local function slotArt(c)
     if c.artCopied or not valid(c.art) then return end
     local kind = c.artKind or 'cell'
+    if kind == 'cell' then
+        -- Grid cells look like the inventory's empty slots: those draw no
+        -- texture of their own (every slot brush is empty, transmog_slotart
+        -- 2026-09-30), only a slightly darker square over the panel's grain,
+        -- measured at about 79% of the panel's brightness.
+        pcall(function() c.art:SetColorAndOpacity(COLOR.emptySlot) end)
+        c.artCopied = true
+        return
+    end
     local from, copied = copySlotArt(c.art, kind)
     if copied then
         pcall(function() c.art:SetColorAndOpacity({ R = 1, G = 1, B = 1, A = 1 }) end)
