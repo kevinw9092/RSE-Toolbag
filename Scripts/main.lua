@@ -6,7 +6,7 @@
 -- slot index where it was, so no items move on existing characters. The
 -- toolbag window lives in RSE-Dock's shared window beside the inventory.
 local TAG = "[RSE-Toolbag] "
-local VERSION = "2.3.0"
+local VERSION = "2.3.1"
 local MODMENU_ID = "RSE-Toolbag"
 
 local cfg = {
@@ -80,6 +80,13 @@ local function isValidObj(x)
     return ok and v == true
 end
 
+-- "/Game/.../Thing.Thing" for StaticFindObject ("" if there is none).
+local function objectPathOf(o)
+    if not isValidObj(o) then return "" end
+    local ok, f = pcall(function() return o:GetFullName() end)
+    return ok and type(f) == "string" and (f:match("^%S+%s+(.+)$") or "") or ""
+end
+
 local function classPath(cls)
     local ok, full = pcall(function() return cls:GetFullName() end)
     if not ok or not full then return nil end
@@ -105,13 +112,15 @@ local function classNameOf(o)
     return nameOf(c)
 end
 
+-- Property kinds per class, keyed by the class's address (no name built per
+-- read); emptied on every map load, so an address is never reused across worlds.
 local kindCache = {}
 local function propKind(obj, name)
-    local key = (classPath(obj:GetClass()) or "?") .. ":" .. name
+    local c = obj:GetClass()
+    local key = tostring(c:GetAddress()) .. ":" .. name
     local cached = kindCache[key]
     if cached ~= nil then return cached or nil end
     local found = nil
-    local c = obj:GetClass()
     while c and not found do
         pcall(function()
             c:ForEachProperty(function(p)
@@ -333,8 +342,8 @@ local function growForToolbag(o, label)
     end
     if maxBefore < total then pcall(function() o:SetPropertyValue("MaxSlotCount", total) end) end
     result.total, result.first, result.pageType = total, total - TOOLBAG_SLOTS, list[#list].type
-    local logKey = label .. ":" .. describePages(list)
-    if method ~= "already there" or (label ~= "template" and not refused[logKey]) then
+    local logKey = cfg.Debug and (label .. ":" .. describePages(list)) or ""
+    if cfg.Debug and (method ~= "already there" or (label ~= "template" and not refused[logKey])) then
         refused[logKey] = true
         debugLog(string.format("%s: toolbag tab (type %d) %s, tabs %s, toolbag = slots %d-%d, MaxSlotCount %s -> %s",
             label, result.pageType, method, describePages(list), result.first, total - 1,
@@ -549,23 +558,39 @@ end
 -- New controllers are reported by the game as they are created (no object scan);
 -- one full scan runs the first time server mode is confirmed, for players who
 -- were already connected (a hot reload, or the mod starting late).
+-- Controllers are kept by path and looked up when used: a kept object of a
+-- player who left can be freed memory by the next use.
 local newControllers = {}
 pcall(NotifyOnNewObject, "/Script/Engine.PlayerController", function(pc)
     newControllers[#newControllers + 1] = pc
 end)
-local controllers = {}          -- address -> controller, this world's
+local controllers = {}          -- path -> true, this world's
 local scannedOnce = false
+local function lookUpPath(path)
+    local ok, o = pcall(function() return StaticFindObject(path) end)
+    if ok and isValidObj(o) then return o end
+    return nil
+end
+local function keepController(pc)
+    if isValidObj(pc) and not nameOf(pc):find("^Default__") then
+        local path = objectPathOf(pc)
+        if path ~= "" then controllers[path] = true end
+    end
+end
 
 local function serverTick(now)
-    if serverMode == false or now < nextServerScan then return end
-    nextServerScan = now + SERVER_SCAN
+    -- Reported controllers are taken in (or dropped, off a server) on every tick,
+    -- so none is kept as an object past the tick it was created in.
     while #newControllers > 0 do
         local pc = table.remove(newControllers)
-        if isValidObj(pc) and not nameOf(pc):find("^Default__") then controllers[pc:GetAddress()] = pc end
+        if serverMode ~= false then keepController(pc) end
     end
+    if serverMode == false or now < nextServerScan then return end
+    nextServerScan = now + SERVER_SCAN
     if serverMode == nil then
-        for _, pc in pairs(controllers) do
-            if isValidObj(pc) then
+        for path in pairs(controllers) do
+            local pc = lookUpPath(path)
+            if pc then
                 local net = netModeOf(pc)
                 if net ~= "unknown" then serverMode = (net == "host") break end
             end
@@ -577,17 +602,16 @@ local function serverTick(now)
         scannedOnce = true
         debugLog("server mode: adding the toolbag slots to joining players' inventories")
         local ok, all = pcall(FindAllOf, "PlayerController")
-        for _, pc in ipairs(ok and all or {}) do
-            if isValidObj(pc) and not nameOf(pc):find("^Default__") then controllers[pc:GetAddress()] = pc end
-        end
+        for _, pc in ipairs(ok and all or {}) do keepController(pc) end
     end
-    for key, pc in pairs(controllers) do
-        if not isValidObj(pc) then
+    for key in pairs(controllers) do
+        local pc = lookUpPath(key)
+        if not pc then
             controllers[key], serverPlayers[key] = nil, nil      -- left the game
         elseif not isLocal(pc) then
             local st = serverPlayers[key]
             if not st then
-                st = { firstSeen = now, nextCheck = now + SERVER_SETTLE }
+                st = { nextCheck = now + SERVER_SETTLE }
                 serverPlayers[key] = st
             end
             if now >= st.nextCheck then
@@ -728,11 +752,6 @@ end
 -- Tools the player carries, cached for a second (the prompt asks 4 times a second).
 -- Entries hold plain data only (slot, names, the item data's path), never the
 -- item data object: a kept game object can be freed memory by the next use.
-local function objectPathOf(o)
-    if not isValidObj(o) then return "" end
-    local ok, f = pcall(function() return o:GetFullName() end)
-    return ok and type(f) == "string" and (f:match("^%S+%s+(.+)$") or "") or ""
-end
 local toolCache, toolCacheAt = nil, -10
 local function scanTools(pc, now)
     now = now or os.clock()
@@ -965,18 +984,30 @@ local FARM_SLOT_CLASS = "/Script/Dominion.FarmSlotComponent"
 local RESPAWN_CLASS = "/Script/Dominion.ResourceRespawnComponent"
 local SCAN_RADIUS = 3000
 local FISH_REACH = 2000
-local RESCAN_DISTANCE = 800
-local RESCAN_SECONDS = 20
+-- A list stays good while everything within reach of you is still inside its
+-- radius: SCAN_RADIUS minus the reach (the tool reach is at most 6 m).
+local RESCAN_DISTANCE = { fish = SCAN_RADIUS - FISH_REACH, other = SCAN_RADIUS - 600 }
+local RESCAN_SECONDS = 45
 local FACING_MIN = 0.34
 local WORLD_SETTLE = 2
 
 local toolLists = {}
+local lastScanAt = nil
 local toolReadyAt = nil
--- Looked up by path each time, never cached: a kept game object can be freed
--- memory by the next use (RSE-Transmog crashes, 2026-09-30).
+-- Game objects are looked up by path each time, never kept: a kept game object
+-- can be freed memory by the next use (RSE-Transmog crashes, 2026-09-30).
+-- Native classes (/Script/...) are never unloaded, so those are kept for the
+-- world (emptied on map load anyway).
+local nativeClasses = {}
 local function scriptClass(path)
-    local ok, found = pcall(function() return StaticFindObject(path) end)
-    if ok and isValidObj(found) then return found end
+    local found = nativeClasses[path]
+    if found and isValidObj(found) then return found end
+    local ok
+    ok, found = pcall(function() return StaticFindObject(path) end)
+    if ok and isValidObj(found) then
+        if path:find("/Script/", 1, true) == 1 then nativeClasses[path] = found end
+        return found
+    end
     return nil
 end
 
@@ -1053,12 +1084,17 @@ local function aimedActor(pawn)
     return nil
 end
 
+-- Actors of a kind around you, as { path, x, y }: an actor is looked up only
+-- when it wins (see nearestInFront). At most one kind is rescanned per tick
+-- (each scan is an object search); the others use their older list until then.
 local function candidates(kind, me, now)
     local list = toolLists[kind]
-    if list and now - list.at < RESCAN_SECONDS then
+    if list then
         local moved = math.sqrt((me.X - list.x) ^ 2 + (me.Y - list.y) ^ 2)
-        if moved < RESCAN_DISTANCE then return list.items end
+        local fresh = now - list.at < RESCAN_SECONDS and moved < (RESCAN_DISTANCE[kind] or RESCAN_DISTANCE.other)
+        if fresh or lastScanAt == now then return list.items end
     end
+    lastScanAt = now
     list = { at = now, x = me.X, y = me.Y, items = {} }
     toolLists[kind] = list
     local classes = SCAN_CLASS[kind]
@@ -1070,8 +1106,9 @@ local function candidates(kind, me, now)
                 if isValidObj(a) and not nameOf(a):find("^Default__") and (kind ~= "rock" or isRockClass(classNameOf(a)))
                     and (kind ~= "vine" or not isPawn(a)) then
                     local l = locationOf(a)
-                    if l and math.sqrt((l.X - me.X) ^ 2 + (l.Y - me.Y) ^ 2) < SCAN_RADIUS then
-                        list.items[#list.items + 1] = { actor = a, x = l.X, y = l.Y }
+                    local path = l and math.sqrt((l.X - me.X) ^ 2 + (l.Y - me.Y) ^ 2) < SCAN_RADIUS and objectPathOf(a) or ""
+                    if path ~= "" then
+                        list.items[#list.items + 1] = { path = path, x = l.X, y = l.Y }
                     end
                 end
             end
@@ -1087,21 +1124,23 @@ local function nearestInFront(kind, pc, me, now, reach, facingMin)
     local fx, fy = math.cos(yaw), math.sin(yaw)
     reach = reach or (kind == "fish" and FISH_REACH or cfg.ToolReach * 100)
     facingMin = facingMin or FACING_MIN
-    local best, bestScore = nil, nil
+    -- Ranked by position alone; then the best ones are looked up, nearest first,
+    -- until one still exists (and, for a tree, still has wood).
+    local ranked = {}
     for _, c in ipairs(candidates(kind, me, now)) do
-        if isValidObj(c.actor) then
-            local dx, dy = c.x - me.X, c.y - me.Y
-            local d = math.sqrt(dx * dx + dy * dy)
-            if d <= reach then
-                local facing = d < 1 and 1 or (dx * fx + dy * fy) / d
-                local score = d * (2 - facing)
-                if facing >= facingMin and (bestScore == nil or score < bestScore) and not (kind == "tree" and isDepleted(c.actor)) then
-                    best, bestScore = c.actor, score
-                end
-            end
+        local dx, dy = c.x - me.X, c.y - me.Y
+        local d = math.sqrt(dx * dx + dy * dy)
+        if d <= reach then
+            local facing = d < 1 and 1 or (dx * fx + dy * fy) / d
+            if facing >= facingMin then ranked[#ranked + 1] = { path = c.path, score = d * (2 - facing) } end
         end
     end
-    return best, bestScore
+    table.sort(ranked, function(a, b) return a.score < b.score end)
+    for _, r in ipairs(ranked) do
+        local actor = lookUpPath(r.path)
+        if actor and not (kind == "tree" and isDepleted(actor)) then return actor, r.score end
+    end
+    return nil
 end
 
 local function findWorkTarget(pc, pawn, now)
@@ -1319,8 +1358,9 @@ local bagFirstChanged = {}
 local function applyBagFirst(reason)
     if not cfg.BagFirst then
         local restored = 0
-        for _, item in pairs(bagFirstChanged) do
-            if isValidObj(item) and pcall(function() item[HOTBAR_FLAG] = true end) then restored = restored + 1 end
+        for path in pairs(bagFirstChanged) do
+            local item = lookUpPath(path)
+            if item and pcall(function() item[HOTBAR_FLAG] = true end) then restored = restored + 1 end
         end
         bagFirstChanged = {}
         if restored > 0 then debugLog(string.format("bag first off: %d item types go to the hotbar again", restored)) end
@@ -1333,7 +1373,7 @@ local function applyBagFirst(reason)
         if isValidObj(item) and not nameOf(item):find("^Default__") then
             local okR, cur = pcall(function() return item[HOTBAR_FLAG] end)
             if okR and cur == true and pcall(function() item[HOTBAR_FLAG] = false end) then
-                bagFirstChanged[item:GetAddress()] = item
+                bagFirstChanged[objectPathOf(item)] = true
                 changed = changed + 1
             end
         end
@@ -1372,6 +1412,7 @@ end
 
 local function keyTick(now)
     if not toolReadyAt or now < toolReadyAt then requests = {} return end
+    if not next(requests) then return end
     local okT, typing = pcall(function() return ModRef:GetSharedVariable("ChestLabels.typing") end)
     if okT and typing == true then requests = {} return end
     local r = requests
@@ -1450,7 +1491,8 @@ local function forgetWorld()
     invChecked = false
     layout = nil
     toolReadyAt = nil
-    toolLists = {}
+    toolLists, lastScanAt, nativeClasses, kindCache = {}, nil, {}, {}
+    newControllers = {}
     pendingSwap = nil
     moveQueue, moveBusy, reserved = {}, nil, {}
     serverMode, serverPlayers, nextServerScan = nil, {}, 0
@@ -1481,8 +1523,9 @@ pcall(RegisterHook, "/Script/Engine.PlayerController:ServerExec", function(ctx, 
     if text ~= PROTO .. " hi" then return end
     local pc = ctx:get()
     if not isValidObj(pc) then return end
-    local key = pc:GetAddress()
-    controllers[key] = pc
+    local key = objectPathOf(pc)
+    if key == "" then return end
+    controllers[key] = true
     local st = serverPlayers[key]
     if st and st.done then
         tellPlayer(pc, string.format("%s ready %d %s", PROTO, st.total or 0, tostring(cfg.ToolbagMode):lower()))
@@ -1593,8 +1636,9 @@ local function findPlayerFallback(now)
     if isValidObj(lastPc) then return end
     -- The controllers the game reported (see server mode) first: no lookup needed.
     local pc = nil
-    for _, c in pairs(controllers) do
-        if isValidObj(c) and isLocal(c) then pc = c break end
+    for path in pairs(controllers) do
+        local c = lookUpPath(path)
+        if c and isLocal(c) then pc = c break end
     end
     if not pc then
         -- A dedicated server has no local player: never ask UEHelpers there (it can scan objects).

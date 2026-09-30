@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.3.1
+- **Toolbag row:** the tool in your hand now gets a thin bronze outline inside its slot, like the action bar's selected slot, instead of an orange frame.
+- **Fewer hitches while moving.** The tool key, the equip prompt and auto tool keep a list of nearby rocks, trees, vines and fishing spots. It is now rebuilt when you have moved far enough that something within reach could be missing from it (about 24 m, 10 m for fishing), or after 45 s, and only one kind per tick. It was every 8 m or 20 s, all kinds at once.
+- **Crash safety:** that list, the players' controllers on a server and the item types changed by bag first are kept as object paths and looked up when used. A rock that was destroyed or unloaded can no longer be touched after it is gone.
+- The dock icon works out the tools you carry while the inventory is open, and otherwise at most every 5 s (it scanned the inventory every second).
+- The Switch Tool prompt is rebuilt at most every 10 s if the game removes it, and looks for the game's key-hint widget every 60 s after 3 misses.
+- Smaller savings: native classes are looked up once per world, property checks no longer build a name each time, the chest-label typing check runs only after a key press, and debug text is built only with Debug on. `hud-dump.txt` is written to a temporary file first.
+
 ## 2.3.0
 - **Toolbag row.** The 10 toolbag slots are shown on the HUD, each with its tool's icon, its number and a durability bar like the action bar's (red when low). A faded SHIFT key cap (your `SlotKeys` modifier) sits at the left, so the keys that take each tool out are always in view. The tool in your hand gets an orange frame. The slots use the game's embroidered item slot frame. It is display only, and hidden while a menu is open or while toolbag storage is off.
   - `QuickRowPosition`: **Above health**, **Below health**, or **Above action bar**. Above the action bar, only slots 1-8 show, to line up with it. The in-world 1-8 bar is the inventory panel's own quick access bar, which stays on screen when the inventory closes, so the row is placed on that panel's canvas and follows it.

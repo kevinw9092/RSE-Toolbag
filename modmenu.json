@@ -3,7 +3,7 @@
   "id": "RSE-Toolbag",
   "name": "RSE-Toolbag",
   "author": "StrawMaple",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "description": "A 10-slot toolbag beside the inventory (needs RSE-Dock). Shift+1-0 equips a slot, and the tool key takes out the right tool for what you face. Empty the toolbag before removing the mod.",
   "settings": [
     {

@@ -34,7 +34,6 @@ local COLOR = {
     -- A light, see-through square with a faint edge, like the action bar's empty slots.
     fill = { R = 0.80, G = 0.80, B = 0.80, A = 0.16 },
     edge = { R = 0.90, G = 0.90, B = 0.90, A = 0.28 },
-    gold = { R = 0.96, G = 0.62, B = 0.20, A = 1 },
     number = { R = 0.92, G = 0.90, B = 0.86, A = 0.9 },
     capEdge = { R = 0.86, G = 0.84, B = 0.80, A = 1 },
     capFill = { R = 0.04, G = 0.035, B = 0.03, A = 0.85 },
@@ -166,7 +165,9 @@ local function describe(w)
 end
 local function dumpHud()
     local dir = (debug.getinfo(1, 'S').source or ''):gsub('^@', ''):match('^(.*)[/\\]Scripts[/\\][^/\\]*$')
-    local f = dir and io.open(dir .. '\\hud-dump.txt', 'w')
+    -- Written to a temporary file, then renamed over the old dump.
+    local path = dir and (dir .. '\\hud-dump.txt')
+    local f = path and io.open(path .. '.tmp', 'w')
     if not f then return end
     -- The panels around every action-bar slot (the in-world 1-8 bar is not a
     -- QuickAccesBar: only the inventory screen's copy is), then the active HUD.
@@ -195,7 +196,9 @@ local function dumpHud()
             f:write(string.rep('  ', depth), describe(w), '\n')
         end, 0)
     end
-    f:close()
+    if not f:close() then os.remove(path .. '.tmp') return end
+    os.remove(path)
+    os.rename(path .. '.tmp', path)
     T.debugLog('quick row: HUD layout written to hud-dump.txt')
 end
 
@@ -247,10 +250,34 @@ local function slotArtFrom(root)
 end
 
 local CLEAR = { R = 0, G = 0, B = 0, A = 0 }
--- The frame's tint: plain, and orange for the tool in your hand (the action bar
--- tints its selected slot's frame the same way).
-local ART_PLAIN = { R = 1, G = 1, B = 1, A = 1 }
-local ART_SELECTED = { R = 1.0, G = 0.62, B = 0.28, A = 1 }
+-- The tool in your hand: a thin gold outline just inside the slot, like the
+-- action bar's selected slot: its bronze (linear colour for #995316).
+local OUTLINE = { R = 0.319, G = 0.087, B = 0.008, A = 1 }
+local OUTLINE_W, OUTLINE_INSET = 2, 3
+
+-- Four thin lines along the edges of an overlay, collapsed until selected.
+-- (A Border draws a filled box, so the outline is made of lines.)
+local function outline(tree, overlay)
+    local layer = umg('Overlay', tree)
+    local sides = { { 0, 1, nil, OUTLINE_W }, { 0, 3, nil, OUTLINE_W }, { 1, 0, OUTLINE_W, nil }, { 3, 0, OUTLINE_W, nil } }
+    for _, s in ipairs(sides) do
+        local box = umg('SizeBox', tree)
+        if s[3] then box:SetWidthOverride(s[3]) end
+        if s[4] then box:SetHeightOverride(s[4]) end
+        local line = umg('Border', tree)
+        line:SetBrushColor(OUTLINE)
+        box:SetContent(line)
+        local ls = layer:AddChildToOverlay(box)
+        pcall(function() ls:SetHorizontalAlignment(s[1]) ls:SetVerticalAlignment(s[2]) end)
+    end
+    local os = overlay:AddChildToOverlay(layer)
+    pcall(function()
+        os:SetHorizontalAlignment(0) os:SetVerticalAlignment(0)
+        os:SetPadding({ Left = OUTLINE_INSET, Top = OUTLINE_INSET, Right = OUTLINE_INSET, Bottom = OUTLINE_INSET })
+    end)
+    layer:SetVisibility(COLLAPSED)
+    return layer
+end
 
 local function cell(tree, row, k, art)
     local size = umg('SizeBox', tree)
@@ -312,9 +339,10 @@ local function cell(tree, row, k, art)
     local ds = overlay:AddChildToOverlay(durBox)
     pcall(function() ds:SetHorizontalAlignment(2) ds:SetVerticalAlignment(3) ds:SetPadding({ Left = 0, Top = 0, Right = 0, Bottom = 5 }) end)
     durBox:SetVisibility(COLLAPSED)
+    local ring = outline(tree, overlay)
     local rs = row:AddChildToHorizontalBox(size)
     pcall(function() rs:SetPadding({ Left = GAP, Top = 0, Right = 0, Bottom = 0 }) rs:SetVerticalAlignment(2) end)
-    return { box = size, edge = edge, fill = fill, frame = frame, image = image, copied = copied, durBox = durBox, fillBox = fillBox, durFill = durFill }
+    return { box = size, ring = ring, edge = edge, fill = fill, frame = frame, image = image, copied = copied, durBox = durBox, fillBox = fillBox, durFill = durFill }
 end
 
 -- Places the row's host above the anchor. Returns how, for the log.
@@ -478,17 +506,12 @@ local function refresh()
             c.frame:SetVisibility(HIT_TEST_INVISIBLE)
             pcall(function() c.edge:SetBrushColor(CLEAR) end)
             pcall(function() c.fill:SetBrushColor(CLEAR) end)
-            c.selected = nil                                    -- repaint the selection on the frame
             if k == 1 then T.debugLog("quick row: slots use the game's item slot frame") end
         end
         local sel = data ~= nil and T.nameOf(data) == held
         if sel ~= c.selected then
             c.selected = sel
-            if c.framed then
-                pcall(function() c.frame:SetColorAndOpacity(sel and ART_SELECTED or ART_PLAIN) end)
-            else
-                pcall(function() c.edge:SetBrushColor(sel and COLOR.gold or (c.copied and CLEAR or COLOR.edge)) end)
-            end
+            pcall(function() c.ring:SetVisibility(sel and HIT_TEST_INVISIBLE or COLLAPSED) end)
         end
     end
 end
@@ -512,7 +535,7 @@ function H.tick(now)
     local pc = T.pc()
     if not T.isValid(pc) then setShown(false) return end
     -- Rebuild when the position setting changed (at once), or when the row's
-    -- widget is really gone: looked up by path, and at most every 10 s.
+    -- widget is really gone: looked up by path every 2 s, rebuilt at most every 10 s.
     if view and (view.pos ~= position() or view.offset ~= offset()) then
         H.forget()
     elseif view and now >= (view.nextCheck or 0) then

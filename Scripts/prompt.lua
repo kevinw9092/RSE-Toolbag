@@ -27,19 +27,30 @@ local view = nil        -- { frame, text, key, legend, shown, textShown }
 local failed = false
 
 -- ------------------------------------------------------ game-style prompt
-local legendClass = nil        -- class of WBP_InputLegend_InputEntry, once found
-local nextLegendLook = 0       -- FindFirstOf walks objects: look at most every 10 s
+-- The class of WBP_InputLegend_InputEntry, kept as its path (a kept class
+-- object can go with its world). FindFirstOf walks objects: it looks every
+-- 10 s, and every 60 s after 3 misses (the legend exists once a menu with key
+-- hints has been open).
+local legendClass = nil
+local nextLegendLook, legendMisses = 0, 0
 
 local function findLegendClass(now)
-    if legendClass then return legendClass end
-    if now < nextLegendLook then return nil end
-    nextLegendLook = now + 10
-    local inst = get(function() return FindFirstOf('WBP_InputLegend_InputEntry_C') end)
-    if valid(inst) then
-        legendClass = get(function() return inst:GetClass() end)
-        T.debugLog('equip prompt: using the game\'s input legend widget')
+    if legendClass then
+        local cls = get(function() return StaticFindObject(legendClass) end)
+        if valid(cls) then return cls end
+        legendClass = nil
     end
-    return legendClass
+    if now < nextLegendLook then return nil end
+    legendMisses = legendMisses + 1
+    nextLegendLook = now + (legendMisses > 3 and 60 or 10)
+    local inst = get(function() return FindFirstOf('WBP_InputLegend_InputEntry_C') end)
+    local cls = valid(inst) and get(function() return inst:GetClass() end)
+    if not valid(cls) then return nil end
+    local path = T.pathOf(cls)
+    if path == '' then return nil end
+    legendClass, legendMisses = path, 0
+    T.debugLog('equip prompt: using the game\'s input legend widget')
+    return cls
 end
 
 local function findNamed(w, wanted, depth)
@@ -207,7 +218,7 @@ local function hideEffects(frame, root)
     local function walk(w, depth)
         if not valid(w) or depth > 12 then return end
         local effect, cls, nm = isEffect(w)
-        seen[#seen + 1] = string.rep(' ', depth) .. nm .. ':' .. cls
+        if T.cfg.Debug then seen[#seen + 1] = string.rep(' ', depth) .. nm .. ':' .. cls end
         if effect then
             if pcall(function() w:SetVisibility(COLLAPSED) end) then hidden = hidden + 1 end
             return
@@ -220,7 +231,9 @@ local function hideEffects(frame, root)
         if valid(inner) and inner ~= w then walk(inner, depth + 1) end
     end
     walk(root, 0)
-    T.debugLog('equip prompt: ' .. hidden .. ' effect widget(s) hidden; panel widgets: ' .. table.concat(seen, ', '))
+    if T.cfg.Debug then
+        T.debugLog('equip prompt: ' .. hidden .. ' effect widget(s) hidden; panel widgets: ' .. table.concat(seen, ', '))
+    end
 end
 
 local function build(pc)
@@ -296,9 +309,15 @@ local function setShown(on, key)
     pcall(function() view.frame:SetVisibility(on and HIT_TEST_INVISIBLE or COLLAPSED) end)
 end
 
+-- A prompt the game destroyed is rebuilt at most every REBUILD seconds (a
+-- rebuild on every tick stacked copies of the 2.3.0 toolbag row).
+local REBUILD = 10
+local lastBuildAt = -math.huge
+
 function P.forget()
     if view then pcall(function() view.frame:RemoveFromParent() end) end
     view = nil
+    legendClass, nextLegendLook, legendMisses = nil, 0, 0
 end
 
 function P.tick(now)
@@ -312,8 +331,16 @@ function P.tick(now)
     local pc = T.pc()
     -- The game-style prompt as soon as its class is known; the framed panel until then.
     local cls = findLegendClass(now)
-    if view and not view.legend and cls and not view.legendFailed then P.forget() end
-    if not view or not valid(view.frame) then
+    if view and not view.legend and cls and not view.legendFailed then
+        pcall(function() view.frame:RemoveFromParent() end)
+        view = nil
+    end
+    if view and not valid(view.frame) then
+        if now - lastBuildAt < REBUILD then return end
+        view = nil
+    end
+    if not view then
+        lastBuildAt = now
         local ok, result = false, nil
         if cls then
             ok, result = pcall(buildLegend, pc, cls)

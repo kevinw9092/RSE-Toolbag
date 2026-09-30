@@ -576,8 +576,14 @@ local function anyPickaxe()
     return fallbackItem or nil
 end
 
-local function register()
+-- The icon needs the tools you carry (an inventory scan): worked out while the
+-- inventory is open, else at most every REGISTER_EVERY seconds.
+local REGISTER_EVERY = 5
+local nextRegister = 0
+local function register(now)
     if not Dock.present() then return end
+    if registered and now < nextRegister and not Dock.inventoryOpen() then return end
+    nextRegister = now + REGISTER_EVERY
     -- The icon: the best tool you carry (pickaxe first), else any pickaxe the game has loaded.
     local item = nil
     local best = T.tools().best
@@ -601,16 +607,22 @@ function W.tick(now)
         end
         return
     end
-    register()
+    register(now)
     local host, panel = Dock.host(), Dock.panel()
     local view = W.built
-    if view and (not valid(view.root) or not valid(view.host) or (host and fullName(host) ~= fullName(view.host))) then
+    -- A new host window (the dock rebuilt it) is checked by name once a second.
+    local moved = false
+    if view and host and now >= (view.hostCheckAt or 0) then
+        view.hostCheckAt = now + 1
+        moved = fullName(host) ~= view.hostName
+    end
+    if view and (moved or not valid(view.root) or not valid(view.host)) then
         for _, k in ipairs(view.actionKeys) do W.actions[k] = nil end
         W.built, view = nil, nil
     end
     if not view and host and panel then
         local ok, result = pcall(build, host, panel)
-        if ok then W.built, view = result, result
+        if ok then W.built, view = result, result view.hostName = fullName(host)
         else log('build: ' .. tostring(result)) return end
     end
     if not view then return end
