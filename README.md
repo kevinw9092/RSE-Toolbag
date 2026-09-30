@@ -46,7 +46,7 @@ Rules:
 | `AutoTool` | `true` | the right tool comes out when you hit with the wrong one |
 | `AutoToolFromWeapon` | `true` | auto tool also from melee weapons, only right in front of you |
 | `BagFirst` | `false` | pickups go to the bag instead of empty hotbar slots |
-| `Debug` | `false` | extra log lines |
+| `Debug` | `false` | extra log lines. Off: only the version line, errors and warnings. Applies at once from RSE-ModMenu |
 
 ## Trying the toolbag safely
 Test on a **throwaway character**, and back up `%LOCALAPPDATA%\RSDragonwilds\Saved\SaveCharacters` first.

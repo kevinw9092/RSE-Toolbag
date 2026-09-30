@@ -6,7 +6,7 @@
 -- slot index where it was, so no items move on existing characters. The
 -- toolbag window lives in RSE-Dock's shared window beside the inventory.
 local TAG = "[RSE-Toolbag] "
-local VERSION = "2.2.1"
+local VERSION = "2.2.2"
 local MODMENU_ID = "RSE-Toolbag"
 
 local cfg = {
@@ -281,7 +281,7 @@ local function growForToolbag(o, label)
     if not slotType then
         if not refused.off then
             refused.off = true
-            log("toolbag storage is off (ToolbagMode = off); the tool key, prompt and auto tool still work")
+            debugLog("toolbag storage is off (ToolbagMode = off); the tool key, prompt and auto tool still work")
         end
         return nil
     end
@@ -332,7 +332,7 @@ local function growForToolbag(o, label)
     local logKey = label .. ":" .. describePages(list)
     if method ~= "already there" or (label ~= "template" and not refused[logKey]) then
         refused[logKey] = true
-        log(string.format("%s: toolbag tab (type %d) %s, tabs %s, toolbag = slots %d-%d, MaxSlotCount %s -> %s",
+        debugLog(string.format("%s: toolbag tab (type %d) %s, tabs %s, toolbag = slots %d-%d, MaxSlotCount %s -> %s",
             label, result.pageType, method, describePages(list), result.first, total - 1,
             tostring(maxBefore), tostring(safeGet(o, "MaxSlotCount"))))
     end
@@ -412,7 +412,7 @@ local function growSlots(inv, total, label)
     local ok, err = pcall(function()
         if #ps >= 2 and ps[2].kind == "BoolProperty" then inv:SetMaxSlotCount(total, false) else inv:SetMaxSlotCount(total) end
     end)
-    log(string.format("%s: inventory had %d < %d slots, SetMaxSlotCount -> %s%s", label, n, total,
+    debugLog(string.format("%s: inventory had %d < %d slots, SetMaxSlotCount -> %s%s", label, n, total,
         tostring(slotCount(inv)), ok and "" or (" ERROR: " .. tostring(err))))
     return ok and (slotCount(inv) or 0) >= total
 end
@@ -465,13 +465,13 @@ local function checkInventory()
             -- Guest: nothing to poll. The server says when the slots are in place (guestTick).
             if not guestWait then
                 guestWait = { deadline = os.clock() + GUEST_TIMEOUT, tries = 0 }
-                log(string.format("co-op guest (net mode %s): %d of %d slots; waiting for the host's RSE-Toolbag", net, n, l.total))
+                debugLog(string.format("co-op guest (net mode %s): %d of %d slots; waiting for the host's RSE-Toolbag", net, n, l.total))
                 pcall(function() lastPc:ServerExec(PROTO .. " hi") end)
             end
             return
         end
     end
-    if guestWait then log("the host added the toolbag slots; toolbag ready") guestWait = nil end
+    if guestWait then debugLog("the host added the toolbag slots; toolbag ready") guestWait = nil end
     layout = l
 end
 
@@ -571,7 +571,7 @@ local function serverTick(now)
     if not serverMode then return end
     if not scannedOnce then
         scannedOnce = true
-        log("server mode: adding the toolbag slots to joining players' inventories")
+        debugLog("server mode: adding the toolbag slots to joining players' inventories")
         local ok, all = pcall(FindAllOf, "PlayerController")
         for _, pc in ipairs(ok and all or {}) do
             if isValidObj(pc) and not nameOf(pc):find("^Default__") then controllers[pc:GetAddress()] = pc end
@@ -591,7 +591,7 @@ local function serverTick(now)
                 local okP, done = pcall(serverPrepare, pc, st)
                 if not okP then log(st.label .. ": " .. tostring(done)) done = false end
                 if done and not st.done then
-                    log(st.label .. ": toolbag ready")
+                    debugLog(st.label .. ": toolbag ready")
                     tellPlayer(pc, string.format("%s ready %d %s", PROTO, st.total or 0, tostring(cfg.ToolbagMode):lower()))
                 end
                 st.done = done
@@ -758,13 +758,13 @@ local function resolveMover(pc)
         local fn = findFunction(owners[c.owner], c.name)
         if fn then
             local params = inputParams(fn)
-            log(string.format("move function %s.%s(%s)", c.owner, c.name, signature(params)))
+            debugLog(string.format("move function %s.%s(%s)", c.owner, c.name, signature(params)))
             local test, why = argsFor(params, "inv", 1, 2, 1)
             if test then
                 mover = { owner = c.owner, name = c.name, params = params }
                 return mover
             end
-            log("  not usable: " .. tostring(why))
+            debugLog("  not usable: " .. tostring(why))
         end
     end
     log("no usable move function; the toolbag window can show tools but not move them. Please send UE4SS.log.")
@@ -794,7 +794,7 @@ local MOVE_GAP, MOVE_CHECK = 0.35, 0.6
 local moveQueue, moveBusy, moveReadyAt = {}, nil, 0
 local statusListeners = {}
 local function status(msg)
-    log(msg)
+    debugLog(msg) -- also shown in the toolbag window
     for _, fn in ipairs(statusListeners) do pcall(fn, msg) end
 end
 
@@ -1243,7 +1243,7 @@ local function applyBagFirst(reason)
             if isValidObj(item) and pcall(function() item[HOTBAR_FLAG] = true end) then restored = restored + 1 end
         end
         bagFirstChanged = {}
-        if restored > 0 then log(string.format("bag first off: %d item types go to the hotbar again", restored)) end
+        if restored > 0 then debugLog(string.format("bag first off: %d item types go to the hotbar again", restored)) end
         return
     end
     local ok, all = pcall(FindAllOf, "ItemData")
@@ -1258,7 +1258,7 @@ local function applyBagFirst(reason)
             end
         end
     end
-    if changed > 0 then log(string.format("bag first (%s): %d item types now go to the bag first", reason, changed)) end
+    if changed > 0 then debugLog(string.format("bag first (%s): %d item types now go to the bag first", reason, changed)) end
 end
 
 -- ------------------------------------------------------------------ keys
@@ -1269,7 +1269,7 @@ local function bindKeys()
     if name ~= "" and name:lower() ~= "none" then
         local key = Key and Key[name:upper()]
         if key and pcall(RegisterKeyBind, key, function() requests.tool = true end) then
-            log("tool key bound to " .. name:upper())
+            debugLog("tool key bound to " .. name:upper())
         else
             log("tool key '" .. name .. "' is not a UE4SS key name; tool key off")
         end
@@ -1287,7 +1287,7 @@ local function bindKeys()
         local key = Key and Key[d]
         if key and pcall(RegisterKeyBind, key, { modKey }, function() requests.slot = k end) then bound = bound + 1 end
     end
-    log(string.format("toolbag keys: %s+1..0 (%d bound)", mod, bound))
+    debugLog(string.format("toolbag keys: %s+1..0 (%d bound)", mod, bound))
 end
 
 local function keyTick(now)
@@ -1324,7 +1324,7 @@ end
 -- --------------------------------------------------------------- the API
 -- What ui.lua and prompt.lua may use.
 local T = {
-    cfg = cfg, log = log, SLOTS = TOOLBAG_SLOTS, FAMILY_ORDER = FAMILY_ORDER,
+    cfg = cfg, log = log, debugLog = debugLog, SLOTS = TOOLBAG_SLOTS, FAMILY_ORDER = FAMILY_ORDER,
     isValid = isValidObj, nameOf = nameOf, displayName = displayName,
     pc = function() return lastPc end,
     ready = function() return layout ~= nil end,
@@ -1369,6 +1369,7 @@ local function forgetWorld()
     controllers, scannedOnce = {}, false
     forgetTools()
     if Prompt then pcall(Prompt.forget) end
+    if UI and UI.forget then pcall(UI.forget) end
 end
 
 pcall(RegisterLoadMapPreHook, function() forgetWorld() end)
@@ -1517,7 +1518,7 @@ local function findPlayerFallback(now)
     if not isPlayerCharacter(pawn) then return end
     lastPc = pc
     toolReadyAt = now + WORLD_SETTLE
-    log("player found without ClientRestart (fallback)")
+    debugLog("player found without ClientRestart (fallback)")
     pcall(checkInventory)
     pcall(applyBagFirst, "world")
 end
