@@ -31,11 +31,11 @@ local COLOR = {
     dim          = { R = 0.58, G = 0.55, B = 0.50, A = 1 },
 }
 local STR = {
-    title = 'TOOLBAG', close = 'Close', storeAll = 'Store all tools', takeAll = 'Take all out',
+    title = 'TOOLBAG', close = 'Close', storeAll = 'Store all', takeAll = 'Take all',
     bagTools = 'Tools in your bag - click to store',
     keys = '%s + number equips a slot',
     empty = 'Empty slot', none = 'No other tools in your bag',
-    notReady = 'The toolbag is not ready yet. See the log (toolbag_status in the console).',
+    notReady = 'Toolbag storage is disabled, check toolbag_status in console.',
 }
 
 local function log(s) T.log('[window] ' .. tostring(s)) end
@@ -100,6 +100,35 @@ end
 local buttonClass = nil
 local UEH = nil
 pcall(function() UEH = require('UEHelpers') end)
+-- The game button left-aligns its label (a left padding plus a spacer taking
+-- the rest of the row) and re-applies that inset when it is first drawn.
+-- Centre the label and let the row span the button, as RSE-Transmog does;
+-- re-applied for a few ticks after the window opens (see W.tick).
+local H_FILL_ALIGN = 0
+local function centerLabel(b)
+    pcall(function() b.bCenterAlignText = true end)
+    pcall(function() b.LeftAlignTextPadding = 0 end)
+    local label = get(function() return b.LabelText end)
+    if not valid(label) then return end
+    pcall(function() label:SetJustification(1) end)
+    pcall(function() label.Slot:SetPadding({ Left = 0, Top = 0, Right = 0, Bottom = 0 }) end)
+    pcall(function() label.Slot:SetHorizontalAlignment(H_CENTER) end)
+    local box = get(function() return label:GetParent() end)
+    if valid(box) then
+        pcall(function() box.Slot:SetSize(FILL) end)
+        pcall(function() box.Slot:SetHorizontalAlignment(H_CENTER) end)
+        local row = get(function() return box:GetParent() end)
+        if valid(row) then pcall(function() row.Slot:SetHorizontalAlignment(H_FILL_ALIGN) end) end
+    end
+end
+
+-- Width that fits a label in the game button's font (Transmog's measurement:
+-- about 11 units per character plus 32 of padding).
+local function fitWidth(label, minW)
+    local n = utf8 and utf8.len(label) or #label
+    return math.max(minW or 0, (n or #label) * 11 + 32)
+end
+
 local function gameButton(view, parent, label, action, minW, minH)
     if not valid(buttonClass) then
         buttonClass = LoadAsset(BUTTON_CLASS)
@@ -109,10 +138,13 @@ local function gameButton(view, parent, label, action, minW, minH)
     local b = get(function() return library:Create(UEH and UEH.GetWorld(), buttonClass, T.pc()) end)
     assert(valid(b), 'could not create a game button')
     local slot = add(parent, b)
-    pcall(function() b:SetMinDimensions(minW or 10, minH or 10) end)
+    local width = label ~= '' and fitWidth(label, minW) or (minW or 10)
+    pcall(function() b:SetMinDimensions(width, minH or 10) end)
     if label ~= '' then
-        pcall(function() b.bCenterAlignText = true end)
         pcall(function() b:SetLabelText(FText(label)) end)
+        centerLabel(b)
+        view.buttons = view.buttons or {}
+        view.buttons[#view.buttons + 1] = b
     end
     if action then
         local key = fullName(b)
@@ -283,8 +315,8 @@ local function build(host, panel)
     local footer = widget('HorizontalBox', tree)
     pad(add(root, footer), 0, 6, 0, 0)
     size(add(footer, widget('Spacer', tree)), FILL)
-    gameButton(view, footer, STR.takeAll, function() T.takeAllOut() end, 150, 34)
-    local _, s2 = gameButton(view, footer, STR.storeAll, function() T.storeAll() end, 170, 34)
+    gameButton(view, footer, STR.takeAll, function() T.takeAllOut() end, 90, 34)
+    local _, s2 = gameButton(view, footer, STR.storeAll, function() T.storeAll() end, 90, 34)
     pad(s2, 6, 0, 0, 0)
 
     local rootSlot = host:AddChildToOverlay(root)
@@ -360,18 +392,36 @@ end
 local registered, iconItem = false, nil
 local lastRefresh = 0
 
-local function register()
-    if not Dock.present() then return end
-    -- The icon: the best pickaxe you carry, else any tool, else initials.
-    local item = nil
-    if T.ready() then
-        local best = T.tools().best
-        for _, f in ipairs(T.FAMILY_ORDER) do
-            if best[f] then item = (fullName(best[f].data):match('^%S+%s+(.+)$')) break end
+-- A pickaxe's item data for the icon when you carry no tool yet (or storage is
+-- off): searched once among the loaded item data, the first time it is needed.
+local fallbackItem = nil
+local function anyPickaxe()
+    if fallbackItem ~= nil then return fallbackItem or nil end
+    fallbackItem = false
+    local ok, all = pcall(FindAllOf, 'ItemData')
+    for _, d in ipairs(ok and all or {}) do
+        local n = T.nameOf(d)
+        if n:find('ITEM_Pickaxe_', 1, true) == 1 then
+            fallbackItem = (fullName(d):match('^%S+%s+(.+)$')) or false
+            if n == 'ITEM_Pickaxe_Bronze' then break end
         end
     end
+    return fallbackItem or nil
+end
+
+local function register()
+    if not Dock.present() then return end
+    -- The icon: the best tool you carry (pickaxe first), else any pickaxe the game has loaded.
+    local item = nil
+    local best = T.tools().best
+    for _, f in ipairs(T.FAMILY_ORDER) do
+        if best[f] then item = (fullName(best[f].data):match('^%S+%s+(.+)$')) break end
+    end
+    if not item and Dock.inventoryOpen() then item = anyPickaxe() end
     if registered and (item == nil or item == iconItem) then return end
-    Dock.register(DOCK_ID, { order = 20, label = 'Toolbag', item = item, window = 'host' })
+    Dock.register(DOCK_ID, { order = 20, label = 'Toolbag', item = item, window = 'host',
+        desc = 'Keep your tools out of your bag. ' .. tostring(T.cfg.SlotKeys):upper()
+            .. ' + 1-0 equips a toolbag slot; ' .. tostring(T.cfg.ToolKey):upper() .. ' equips the right tool for what you face.' })
     registered, iconItem = true, item
 end
 
@@ -401,9 +451,13 @@ function W.tick(now)
     if open ~= view.open then
         view.open = open
         view.root:SetVisibility(open and SELF_HIT_TEST_INVISIBLE or COLLAPSED)
-        if open then lastRefresh = 0 end
+        if open then lastRefresh, view.recenterTicks = 0, 3 end
     end
     if not open then return end
+    if (view.recenterTicks or 0) > 0 then
+        view.recenterTicks = view.recenterTicks - 1
+        for _, b in ipairs(view.buttons or {}) do if valid(b) then centerLabel(b) end end
+    end
     hover(view)
     if now - lastRefresh >= 0.3 then
         lastRefresh = now

@@ -30,13 +30,13 @@ end
 function D.present() return D.version() ~= nil end
 
 -- Adds or updates this mod's icon. spec: order (number, lower is further left),
--- label (tooltip), icon (Texture2D object path) or item (item data asset path,
+-- label (tooltip title), desc (tooltip text), icon (Texture2D object path) or item (item data asset path,
 -- its icon is used), window ('host' = content goes in the dock's shared window,
 -- 'own' = the mod places its own window). Call again to change the icon.
 function D.register(id, spec)
     assert(type(id) == 'string' and id:match('^[%w_%-]+$'), 'dock id must be letters, digits, _ or -')
     local parts = {}
-    for _, k in ipairs({ 'order', 'label', 'icon', 'item', 'window' }) do
+    for _, k in ipairs({ 'order', 'label', 'desc', 'icon', 'item', 'window' }) do
         if spec[k] ~= nil then parts[#parts + 1] = k .. '=' .. (tostring(spec[k]):gsub('[;=\r\n]', ' ')) end
     end
     setv('item.' .. id, table.concat(parts, ';'))

@@ -6,7 +6,7 @@
 -- slot index where it was, so no items move on existing characters. The
 -- toolbag window lives in RSE-Dock's shared window beside the inventory.
 local TAG = "[RSE-Toolbag] "
-local VERSION = "2.0.0"
+local VERSION = "2.1.0"
 local MODMENU_ID = "RSE-Toolbag"
 
 local cfg = {
@@ -18,6 +18,7 @@ local cfg = {
     ToolReach = 3.0,
     UseCompost = true,
     BagFirst = false,
+    ToolbagMode = "off",         -- toolbag storage: off, private or items (see README; restart after a change)
     Debug = false,
 }
 local LIVE_KEYS = { "EquipPrompt", "AutoTool", "AutoToolFromWeapon", "ToolReach", "UseCompost", "BagFirst", "Debug" }
@@ -190,38 +191,135 @@ end
 local layout = nil     -- toolbag layout of the local player's inventory, see growForToolbag
 local refused = {}
 
--- Appends the toolbag to the last tab of `o` (the controller template or the
--- live inventory component). Idempotent: an already-grown tab stays as it is.
--- Returns the layout: { first, total, qa, pages = { {type, start, slots} } }.
+-- The toolbag is a FIFTH inventory tab appended after the four vanilla ones
+-- (bag, runes, ammo, quest). Appending keeps every existing slot number where
+-- it was. No tab button exists for it, so the inventory screen never draws it;
+-- only the toolbag window shows its slots.
+--
+-- History: 2.0.0 grew the quest tab instead (72 -> 82). The quest tab's screen
+-- holds exactly 72 slots and the game read slot 72, one past the end, and
+-- crashed (dump 2026-09-30: access violation at 72 * 0x58 + 0x18).
+--
+-- ToolbagMode picks the new tab's type:
+--   "off"     no tab is added (default until tested)
+--   "private" type 64, a value the game does not use: pickups never go there
+--             and nothing in the game looks for it. Untested: the game may
+--             refuse items there or drop them on load.
+--   "items"   the bag's own type: accepts every tool for certain, but pickups
+--             may overflow into it once the bag is full.
+local PRIVATE_TYPE = 64
+local VANILLA_PAGES = 4
+
+local function toolbagType(list)
+    local mode = tostring(cfg.ToolbagMode or "off"):lower()
+    if mode == "private" then return PRIVATE_TYPE end
+    if mode == "items" then
+        local t = nil
+        for _, p in ipairs(list) do if not t or p.type < t then t = p.type end end
+        return t
+    end
+    return nil
+end
+
+local function readPages(o)
+    local pages, list = inventoryPages(o)
+    if not pages then return nil end
+    return pages, list
+end
+
+-- Adds one element to the InventoryPages array. UE4SS builds differ in how a
+-- struct array can grow from Lua, so the known ways are tried in turn, and
+-- each is verified by reading the array back. Page 1 must be unchanged after
+-- (a copy that turned out to be a reference would be undone and rejected).
+local function appendPage(o, slotType, slots)
+    local pages, list = readPages(o)
+    if not pages then return nil, "pages unreadable" end
+    local n = #list
+    local firstType, firstSlots = list[1].type, list[1].slots
+    local attempts = {
+        { "copy of page 1", function(p) p[n + 1] = p[1] end },
+        { "table", function(p) p[n + 1] = { SlotType = slotType, NumSlots = slots } end },
+    }
+    local reasons = {}
+    for _, a in ipairs(attempts) do
+        local okA, errA = pcall(a[2], pages)
+        local fresh, freshList = readPages(o)
+        if fresh and #freshList == n + 1 then
+            pcall(function() fresh[n + 1].SlotType = slotType end)
+            pcall(function() fresh[n + 1].NumSlots = slots end)
+            local _, check = readPages(o)
+            local added, first = check and check[n + 1], check and check[1]
+            if added and added.type == slotType and added.slots == slots
+                and first.type == firstType and first.slots == firstSlots then
+                return a[1]
+            end
+            reasons[#reasons + 1] = a[1] .. ": added but fields did not stick"
+            -- Undo what can be undone: a 0-slot page holds nothing.
+            pcall(function() fresh[n + 1].NumSlots = 0 end)
+            pcall(function() fresh[1].SlotType = firstType; fresh[1].NumSlots = firstSlots end)
+            return nil, table.concat(reasons, "; ")
+        end
+        reasons[#reasons + 1] = a[1] .. ": " .. (okA and "array did not grow" or tostring(errA))
+    end
+    return nil, table.concat(reasons, "; ")
+end
+
+local function describePages(list)
+    local out = {}
+    for i, p in ipairs(list) do out[i] = string.format("%d:%d", p.type, p.slots) end
+    return table.concat(out, " ")
+end
+
+-- Adds the toolbag tab to `o` (the controller template or the live inventory
+-- component). Idempotent. Returns the layout:
+-- { first, total, qa, pageType, pages = { {type, start, slots} } } or nil.
 local function growForToolbag(o, label)
     if not isValidObj(o) then return nil end
-    local pages, list = inventoryPages(o)
+    local pages, list = readPages(o)
     if not pages or #list == 0 then return nil end
-    local qa = safeGet(o, "NumberOfQuickActionSlots")
-    local maxBefore = safeGet(o, "MaxSlotCount")
-    if type(qa) ~= "number" or type(maxBefore) ~= "number" then return nil end
-    local last = #list
-    local cur = list[last].slots
-    local vanilla
-    if VANILLA_SIZES[cur] then vanilla = cur
-    elseif VANILLA_SIZES[cur - TOOLBAG_SLOTS] then vanilla = cur - TOOLBAG_SLOTS
-    else
-        if not refused[label] then
-            refused[label] = true
-            log(string.format("%s: last tab has %d slots, not a vanilla size; toolbag OFF so no item can move. "
-                .. "Another inventory-size mod is probably installed.", label, cur))
+    local slotType = toolbagType(list)
+    if not slotType then
+        if not refused.off then
+            refused.off = true
+            log("toolbag storage is off (ToolbagMode = off); the tool key, prompt and auto tool still work")
         end
         return nil
     end
-    local want = vanilla + TOOLBAG_SLOTS
-    if cur < want then
-        pcall(function() pages[last].NumSlots = want end)
-        local okN, s = pcall(function() return pages[last].NumSlots end)
-        if okN and type(s) == "number" then list[last].slots = s end
+    local qa = safeGet(o, "NumberOfQuickActionSlots")
+    local maxBefore = safeGet(o, "MaxSlotCount")
+    if type(qa) ~= "number" or type(maxBefore) ~= "number" then return nil end
+    for i = 1, math.min(#list, VANILLA_PAGES) do
+        if not VANILLA_SIZES[list[i].slots] then
+            if not refused[label] then
+                refused[label] = true
+                log(string.format("%s: tabs are %s, not the vanilla layout; toolbag OFF so no item can move. "
+                    .. "Another inventory-size mod is probably installed.", label, describePages(list)))
+            end
+            return nil
+        end
     end
-    if list[last].slots ~= want then
-        log(label .. ": could not add the toolbag slots to the last tab")
+    local method = "already there"
+    if #list == VANILLA_PAGES then
+        local how, why = appendPage(o, slotType, TOOLBAG_SLOTS)
+        if not how then
+            if not refused[label .. "append"] then
+                refused[label .. "append"] = true
+                log(label .. ": could not add the toolbag tab (" .. tostring(why) .. "); toolbag OFF")
+            end
+            return nil
+        end
+        method = how
+        pages, list = readPages(o)
+    elseif not (#list == VANILLA_PAGES + 1 and list[#list].slots == TOOLBAG_SLOTS) then
+        if not refused[label] then
+            refused[label] = true
+            log(string.format("%s: unexpected tabs %s; toolbag OFF", label, describePages(list)))
+        end
         return nil
+    elseif list[#list].type ~= slotType then
+        -- ToolbagMode changed since this inventory was built: items stay in the same slot numbers.
+        pcall(function() pages[#list].SlotType = slotType end)
+        pages, list = readPages(o)
     end
     local result = { qa = qa, pages = {} }
     local total = qa
@@ -230,12 +328,44 @@ local function growForToolbag(o, label)
         total = total + p.slots
     end
     if maxBefore < total then pcall(function() o:SetPropertyValue("MaxSlotCount", total) end) end
-    result.total, result.first, result.pageType = total, total - TOOLBAG_SLOTS, list[last].type
-    if cur ~= want or label ~= "template" then
-        log(string.format("%s: last tab (type %d) %d -> %d slots, toolbag = slots %d-%d, MaxSlotCount %s -> %s",
-            label, list[last].type, cur, want, result.first, total - 1, tostring(maxBefore), tostring(safeGet(o, "MaxSlotCount"))))
+    result.total, result.first, result.pageType = total, total - TOOLBAG_SLOTS, list[#list].type
+    if method ~= "already there" or label ~= "template" then
+        log(string.format("%s: toolbag tab (type %d) %s, tabs %s, toolbag = slots %d-%d, MaxSlotCount %s -> %s",
+            label, result.pageType, method, describePages(list), result.first, total - 1,
+            tostring(maxBefore), tostring(safeGet(o, "MaxSlotCount"))))
     end
     return result
+end
+
+-- For toolbag_probe: slot type names, and the fields of one inventory page.
+local function slotTypeNames()
+    local names = {}
+    pcall(function()
+        local e = StaticFindObject("/Script/Dominion.EInventorySlotType")
+        e:ForEachName(function(n, v) names[v] = n:ToString() end)
+    end)
+    return names
+end
+
+local function pageFields(o)
+    local out = {}
+    pcall(function()
+        local c = o:GetClass()
+        while c do
+            local found = false
+            c:ForEachProperty(function(p)
+                if not found and p:GetFName():ToString() == "InventoryPages" then
+                    found = true
+                    p:GetInner():GetStruct():ForEachProperty(function(sp)
+                        out[#out + 1] = sp:GetFName():ToString() .. ":" .. sp:GetClass():GetFName():ToString()
+                    end)
+                end
+            end)
+            if found then break end
+            c = superOf(c)
+        end
+    end)
+    return out
 end
 
 local function patchInventoryTemplate()
@@ -264,7 +394,17 @@ local function checkInventory()
     local n = slotCount(inv)
     if type(n) == "number" and n < l.total then
         local okH, auth = pcall(function() return lastPc:HasAuthority() end)
-        if not okH or auth ~= true then
+        -- The world's own view, for the log and as a second opinion: a standalone (solo, offline)
+        -- or listen-server world is the host even when the controller's check says otherwise.
+        local kismet = StaticFindObject("/Script/Engine.Default__KismetSystemLibrary")
+        local world = nil
+        pcall(function() world = lastPc:GetWorld() end)
+        local okS, server = pcall(function() return kismet:IsServer(world) end)
+        local okA, alone = pcall(function() return kismet:IsStandalone(world) end)
+        local net = (okA and alone == true) and "standalone" or ((okS and server == true) and "host" or ((okS and server == false) and "client" or "unknown"))
+        log(string.format("inventory has %d slots, layout wants %d; net mode %s, controller authority %s",
+            n, l.total, net, okH and tostring(auth) or "unreadable"))
+        if not ((okH and auth == true) or net == "standalone" or net == "host") then
             -- Co-op guest: the host decides the layout and must run the mod too.
             log(string.format("toolbag off: %d slots < %d on a co-op guest; the host needs RSE-Toolbag too", n, l.total))
             return
@@ -1094,12 +1234,79 @@ if type(RegisterConsoleCommandHandler) == "function" then
         out("  held: " .. (isValidObj(lastPc) and heldItemName(lastPc) or "?"))
         return true
     end)
+
+    -- "toolbag_probe" on the MAIN MENU (no character loaded): can a fifth inventory tab be added
+    -- from Lua on this game and UE4SS build? It changes the inventory template the game builds
+    -- characters from, so QUIT THE GAME AFTERWARDS instead of loading a character.
+    pcall(RegisterConsoleCommandHandler, "toolbag_probe", function(_, _, ar)
+        local function out(line) log("probe: " .. line) pcall(function() ar:Log(TAG .. "probe: " .. line) end) end
+        local ok, err = pcall(function()
+            -- The main menu has a player controller too (for the character preview), so "a character is
+            -- loaded" means a controller that owns an inventory component.
+            if isValidObj(lastPc) and isValidObj(safeGet(lastPc, INVENTORY_PROPERTY)) then
+                out("a character is loaded: run this on the main menu, then quit without loading one")
+                return
+            end
+            local tpl = StaticFindObject(INVENTORY_TEMPLATE)
+            if not isValidObj(tpl) then out("inventory template not found (game not initialised yet?)") return end
+            local names = slotTypeNames()
+            local typeNames = {}
+            for v, n in pairs(names) do typeNames[#typeNames + 1] = v .. "=" .. n end
+            table.sort(typeNames)
+            out("slot types: " .. (#typeNames > 0 and table.concat(typeNames, ", ") or "(enum not readable)"))
+            out("page fields: " .. table.concat(pageFields(tpl), ", "))
+            local _, list = readPages(tpl)
+            if not list then out("InventoryPages not readable") return end
+            for i, p in ipairs(list) do
+                out(string.format("tab %d: type %d (%s), %d slots", i, p.type, names[p.type] or "?", p.slots))
+            end
+            out("quick action slots " .. tostring(safeGet(tpl, "NumberOfQuickActionSlots"))
+                .. ", MaxSlotCount " .. tostring(safeGet(tpl, "MaxSlotCount")))
+            if #list ~= VANILLA_PAGES then out("not 4 tabs: skipping the append test") return end
+            local how, why = appendPage(tpl, PRIVATE_TYPE, TOOLBAG_SLOTS)
+            if how then
+                local _, after = readPages(tpl)
+                out("APPEND WORKS (" .. how .. "): tabs now " .. describePages(after))
+                -- Leave nothing usable behind in case a character is loaded anyway.
+                local pages = readPages(tpl)
+                pcall(function() pages[#after].NumSlots = 0 end)
+                out("test tab emptied (0 slots). Now QUIT the game; then set ToolbagMode = private in config.txt "
+                    .. "and try it on a throwaway character.")
+            else
+                out("APPEND FAILED: " .. tostring(why))
+                out("a fifth tab cannot be added on this build; tell the RSE-Toolbag author")
+            end
+        end)
+        if not ok then out("error: " .. tostring(err)) end
+        return true
+    end)
+end
+
+-- Fallback when ClientRestart never reaches us: ConsoleEnablerMod unregisters its own ClientRestart
+-- hook at load, and on UE4SS 3.0.x that drops every Lua callback on that function (seen 2026-09-30:
+-- the hook was removed and this mod never saw the player). Every 2 s without a player, ask UEHelpers
+-- for the local controller; this is a cached lookup, not an object scan.
+local UEH = nil
+pcall(function() UEH = require("UEHelpers") end)
+local function findPlayerFallback(now)
+    if isValidObj(lastPc) or not UEH then return end
+    local ok, pc = pcall(UEH.GetPlayerController)
+    if not ok or not isValidObj(pc) then return end
+    local pawn = nil
+    pcall(function() pawn = pc.Pawn end)
+    if not isPlayerCharacter(pawn) then return end
+    lastPc = pc
+    toolReadyAt = now + WORLD_SETTLE
+    log("player found without ClientRestart (fallback)")
+    pcall(checkInventory)
+    pcall(applyBagFirst, "world")
 end
 
 local ticks = 0
 local function tick()
     ticks = ticks + 1
     pcall(modMenuSync)
+    if ticks % 20 == 0 then pcall(findPlayerFallback, os.clock()) end
     if not invChecked and isValidObj(lastPc) and ticks % 50 == 0 then pcall(checkInventory) end
     local now = os.clock()
     keyTick(now)

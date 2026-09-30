@@ -1,6 +1,14 @@
 # RSE-Toolbag settings
 # Change them in Esc > MODS if you use RSE-ModMenu, or edit this file with the game closed.
 
+# ---- Toolbag storage (restart the game after a change) ----
+# off     = no toolbag slots (default). The tool key, prompt and auto tool still work from your bag.
+# private = a hidden fifth inventory tab of its own type: pickups never go there. EXPERIMENTAL.
+# items   = a hidden fifth tab of the bag's type: accepts every tool, but pickups can overflow into it.
+# Try a new mode on a throwaway character first (see README). Before switching back to off,
+# or removing the mod, click "Take all out" in the toolbag window.
+ToolbagMode = off
+
 # ---- Toolbag keys ----
 # Modifier for 1-0 that equips toolbag slots 1-10: SHIFT, CTRL, ALT or NONE (off). Restart after a change.
 SlotKeys = SHIFT

@@ -3,9 +3,12 @@
   "id": "RSE-Toolbag",
   "name": "RSE-Toolbag",
   "author": "notto0606, RSE contributors",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "A 10-slot toolbag beside the inventory (needs RSE-Dock). Shift+1-0 equips a slot, and the tool key takes out the right tool for what you face. Empty the toolbag before removing the mod.",
   "settings": [
+    { "type": "header", "label": "Storage" },
+    { "key": "ToolbagMode", "type": "choice", "label": "Toolbag storage", "options": ["off", "private", "items"], "default": "off", "restart": true,
+      "tooltip": "off: no toolbag slots. private: a hidden tab of its own (experimental). items: a hidden bag-type tab; pickups can overflow into it. Take all tools out before switching to off." },
     { "type": "header", "label": "Keys" },
     { "key": "SlotKeys", "type": "choice", "label": "Toolbag slot keys", "options": ["SHIFT", "CTRL", "ALT", "NONE"], "default": "SHIFT", "restart": true,
       "tooltip": "Hold this and press 1-0 to equip toolbag slot 1-10. NONE turns the keys off." },
@@ -26,6 +29,6 @@
     { "key": "BagFirst", "type": "toggle", "label": "Pickups go to the bag first", "default": false,
       "tooltip": "Picked-up items go into your bag instead of filling empty hotbar slots. In co-op the host's setting decides." },
     { "key": "Debug", "type": "toggle", "label": "Debug log", "default": false,
-      "tooltip": "Extra lines in ue4ss\UE4SS.log." }
+      "tooltip": "Extra lines in ue4ss\\UE4SS.log." }
   ]
 }
