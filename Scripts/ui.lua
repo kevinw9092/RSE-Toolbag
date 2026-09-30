@@ -20,12 +20,21 @@ local V_FILL, V_TOP, V_CENTER, V_BOTTOM = 0, 1, 2, 3
 local FILL = { SizeRule = 1, Value = 1 }
 local COLUMNS, CELL, ICON = 5, 86, 62
 local BAG_CELLS = 20
+-- Window spacing, shared with RSE-Transmog's ui.lua (keep both in sync). The
+-- content sits at the inventory frame's own inset times 0.9 (RSE-Dock's
+-- shared window; Transmog's FRAME_INSET), plus CONTENT_PAD.
+local CONTENT_PAD = 0 -- window inset to the content
+local ROW_GAP = 6     -- between rows: title/Close, hint, grids, footer
+local CELL_PAD = 2    -- grid slot padding: cells are 2 * CELL_PAD apart
+local BUTTON_W, BUTTON_H, TITLE_SIZE = 90, 34, 15 -- Close and footer buttons, title text
 local COLOR = {
+    -- Slots: the game's slot art underneath (see copySlotArt); `slot` only if
+    -- that cannot be copied. Hover and selection are drawn over it.
     slot         = { R = 0.040, G = 0.036, B = 0.031, A = 0.92 },
-    slotHover    = { R = 0.085, G = 0.072, B = 0.052, A = 0.95 },
+    slotHover    = { R = 0.150, G = 0.120, B = 0.075, A = 0.45 },
     slotSelected = { R = 0.190, G = 0.145, B = 0.070, A = 0.95 },
-    slotEdge     = { R = 0.150, G = 0.132, B = 0.105, A = 1 },
     hoverEdge    = { R = 0.520, G = 0.420, B = 0.240, A = 1 },
+    clear        = { R = 0, G = 0, B = 0, A = 0 },
     gold         = { R = 0.96, G = 0.82, B = 0.50, A = 1 },
     text         = { R = 0.88, G = 0.85, B = 0.78, A = 1 },
     dim          = { R = 0.58, G = 0.55, B = 0.50, A = 1 },
@@ -194,10 +203,81 @@ local function iconOf(data)
     return tex
 end
 
+-- --------------------------------------------------------------- slot art
+-- The game's inventory slot art, for the cells: the idle brush of a live
+-- inventory slot (WBP_Inventory_ItemSlot_C, a CommonUI button that draws its
+-- background from its button style). Tried in order: the style's NormalBase,
+-- the brush the slot draws now (NormalStyle.Normal), its CommonSlotBackground
+-- texture or material. Only brush data is copied (a struct holding the
+-- texture or material); the slot widget itself, with its hover particles
+-- (NS_InventoryHighlight), is never created. Same code as RSE-Transmog.
+local SLOT_CLASS = 'WBP_Inventory_ItemSlot_C'
+local slotSource, slotSearched, slotArtLogged = nil, -math.huge, false
+
+local function paintable(brush)
+    return get(function()
+        if brush.DrawAs == 0 or not valid(brush.ResourceObject) then return false end -- 0 = no draw
+        return brush.TintColor.ColorUseRule ~= 0 or brush.TintColor.SpecifiedColor.A > 0.01
+    end) == true
+end
+
+-- A live inventory slot, searched again (at most every 2 s) once it is gone.
+local function findSlotSource()
+    if valid(slotSource) then return slotSource end
+    if os.clock() - slotSearched < 2 then return nil end
+    slotSearched, slotSource = os.clock(), nil
+    for _, s in ipairs(get(function() return FindAllOf(SLOT_CLASS) end) or {}) do
+        if valid(s) and not fullName(s):find('Default__', 1, true) then slotSource = s break end
+    end
+    return slotSource
+end
+
+-- Copies the slot art onto `image`; returns what was copied, or nil.
+local function copySlotArt(image)
+    local s = findSlotSource()
+    if not s then return nil end
+    local style = get(function() return s:GetStyle() end)
+    for _, source in ipairs({
+        { 'style NormalBase', function() return style.NormalBase end },
+        { 'NormalStyle.Normal', function() return s.NormalStyle.Normal end },
+    }) do
+        local brush = get(source[2])
+        if brush and paintable(brush) and pcall(function() image:SetBrush(brush) end)
+            and valid(get(function() return image.Brush.ResourceObject end)) then
+            return source[1]
+        end
+    end
+    local resource = get(function() return s.CommonSlotBackground end)
+    if valid(resource) then
+        if get(function() return resource:IsA('/Script/Engine.Texture2D') end)
+            and pcall(function() image:SetBrushFromTexture(resource, false) end) then
+            return 'CommonSlotBackground'
+        elseif get(function() return resource:IsA('/Script/Engine.MaterialInterface') end)
+            and pcall(function() image:SetBrushFromMaterial(resource) end) then
+            return 'CommonSlotBackground'
+        end
+    end
+    return nil
+end
+
+-- Gives a cell the slot art once it can be found (flat `slot` till then).
+local function slotArt(c)
+    if c.artCopied or not valid(c.art) then return end
+    local copied = copySlotArt(c.art)
+    if copied then
+        pcall(function() c.art:SetColorAndOpacity({ R = 1, G = 1, B = 1, A = 1 }) end)
+        c.artCopied = true
+        if not slotArtLogged then
+            slotArtLogged = true
+            log('slot art copied from ' .. fullName(slotSource) .. ' (' .. copied .. ')')
+        end
+    end
+end
+
 -- ------------------------------------------------------------------ cells
 local function paint(c)
-    local edge = c.selected and COLOR.gold or (c.hovered and COLOR.hoverEdge or COLOR.slotEdge)
-    local fill = c.selected and COLOR.slotSelected or (c.hovered and COLOR.slotHover or COLOR.slot)
+    local edge = c.selected and COLOR.gold or (c.hovered and COLOR.hoverEdge or COLOR.clear)
+    local fill = c.selected and COLOR.slotSelected or (c.hovered and COLOR.slotHover or COLOR.clear)
     if c.paintedEdge ~= edge then c.paintedEdge = edge; pcall(function() c.edge:SetBrushColor(edge) end) end
     if c.paintedFill ~= fill then c.paintedFill = fill; pcall(function() c.bg:SetBrushColor(fill) end) end
 end
@@ -209,6 +289,11 @@ local function cell(view, grid, index, action, corner)
     pcall(function() sizeBox:SetClipping(1) end)
     local overlay = widget('Overlay', tree)
     sizeBox:SetContent(overlay)
+    -- The slot art underneath; hover and selection outline and fill over it.
+    local art = widget('Image', tree)
+    pcall(function() art:SetColorAndOpacity(COLOR.slot) end)
+    art:SetVisibility(HIT_TEST_INVISIBLE)
+    align(overlay:AddChildToOverlay(art), H_FILL, V_FILL)
     local edge = widget('Border', tree)
     edge:SetPadding({ Left = 2, Top = 2, Right = 2, Bottom = 2 })
     local bg = widget('Border', tree)
@@ -224,7 +309,8 @@ local function cell(view, grid, index, action, corner)
     image:SetVisibility(COLLAPSED)
     iconBox:SetContent(image)
     bg:SetContent(iconBox)
-    local c = { edge = edge, bg = bg, image = image, box = sizeBox }
+    local c = { art = art, edge = edge, bg = bg, image = image, box = sizeBox }
+    slotArt(c)
     if corner then
         local label = newText(tree, 11, COLOR.dim, 'medium')
         setText(label, corner)
@@ -270,27 +356,27 @@ local function build(host, panel)
 
     local header = widget('HorizontalBox', tree)
     add(root, header)
-    local title = newText(tree, 15, COLOR.gold, 'medium')
+    local title = newText(tree, TITLE_SIZE, COLOR.gold, 'medium')
     setText(title, STR.title)
     local ts = add(header, title)
     size(ts, FILL)
     align(ts, nil, V_CENTER)
-    local _, closeSlot = gameButton(view, header, STR.close, function() Dock.close(DOCK_ID) end, 90, 34)
+    local _, closeSlot = gameButton(view, header, STR.close, function() Dock.close(DOCK_ID) end, BUTTON_W, BUTTON_H)
     align(closeSlot, nil, V_CENTER)
 
     local keys = newText(tree, 11, COLOR.dim)
     setText(keys, string.format(STR.keys, tostring(T.cfg.SlotKeys):upper()))
-    pad(add(root, keys), 2, 6, 2, 6)
+    pad(add(root, keys), 2, ROW_GAP, 2, ROW_GAP)
 
     local grid = widget('UniformGridPanel', tree)
-    pcall(function() grid:SetSlotPadding({ Left = 2, Top = 2, Right = 2, Bottom = 2 }) end)
+    pcall(function() grid:SetSlotPadding({ Left = CELL_PAD, Top = CELL_PAD, Right = CELL_PAD, Bottom = CELL_PAD }) end)
     add(root, grid)
     for k = 1, T.SLOTS do
         view.slots[k] = cell(view, grid, k - 1, function() W.clickSlot(k) end, tostring(k % 10))
     end
 
     view.details = newText(tree, 14, COLOR.gold, 'medium')
-    pad(add(root, view.details), 2, 6, 2, 0)
+    pad(add(root, view.details), 2, ROW_GAP, 2, 0)
 
     local sub = newText(tree, 11, COLOR.dim)
     setText(sub, STR.bagTools)
@@ -300,7 +386,7 @@ local function build(host, panel)
     local listSlot = add(root, list)
     size(listSlot, FILL)
     local bagGrid = widget('UniformGridPanel', tree)
-    pcall(function() bagGrid:SetSlotPadding({ Left = 2, Top = 2, Right = 2, Bottom = 2 }) end)
+    pcall(function() bagGrid:SetSlotPadding({ Left = CELL_PAD, Top = CELL_PAD, Right = CELL_PAD, Bottom = CELL_PAD }) end)
     add(list, bagGrid)
     for j = 1, BAG_CELLS do
         view.bag[j] = cell(view, bagGrid, j - 1, function() W.clickBag(j) end)
@@ -310,17 +396,18 @@ local function build(host, panel)
     add(list, view.none)
 
     view.status = newText(tree, 11, COLOR.dim)
-    pad(add(root, view.status), 2, 6, 2, 0)
+    pad(add(root, view.status), 2, ROW_GAP, 2, 0)
 
     local footer = widget('HorizontalBox', tree)
-    pad(add(root, footer), 0, 6, 0, 0)
+    pad(add(root, footer), 0, ROW_GAP, 0, 0)
     size(add(footer, widget('Spacer', tree)), FILL)
-    gameButton(view, footer, STR.takeAll, function() T.takeAllOut() end, 90, 34)
-    local _, s2 = gameButton(view, footer, STR.storeAll, function() T.storeAll() end, 90, 34)
+    gameButton(view, footer, STR.takeAll, function() T.takeAllOut() end, BUTTON_W, BUTTON_H)
+    local _, s2 = gameButton(view, footer, STR.storeAll, function() T.storeAll() end, BUTTON_W, BUTTON_H)
     pad(s2, 6, 0, 0, 0)
 
     local rootSlot = host:AddChildToOverlay(root)
     align(rootSlot, H_FILL, V_FILL)
+    pad(rootSlot, CONTENT_PAD, CONTENT_PAD, CONTENT_PAD, CONTENT_PAD)
     root:SetVisibility(COLLAPSED)
     return view
 end
@@ -451,7 +538,11 @@ function W.tick(now)
     if open ~= view.open then
         view.open = open
         view.root:SetVisibility(open and SELF_HIT_TEST_INVISIBLE or COLLAPSED)
-        if open then lastRefresh, view.recenterTicks = 0, 3 end
+        if open then
+            lastRefresh, view.recenterTicks = 0, 3
+            -- Cells built before any inventory slot existed get the slot art now.
+            for _, c in ipairs(view.cells) do slotArt(c) end
+        end
     end
     if not open then return end
     if (view.recenterTicks or 0) > 0 then

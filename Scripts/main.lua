@@ -6,7 +6,7 @@
 -- slot index where it was, so no items move on existing characters. The
 -- toolbag window lives in RSE-Dock's shared window beside the inventory.
 local TAG = "[RSE-Toolbag] "
-local VERSION = "2.2.0"
+local VERSION = "2.2.1"
 local MODMENU_ID = "RSE-Toolbag"
 
 local cfg = {
