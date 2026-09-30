@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.2.6
+- **The equip prompt looks like the game's own prompts.** It now reads "Switch Tool [X]", drawn like "Harvest [E]" or the inventory's "Sort [V]": a plain label and a boxed key, with no frame. It reuses the game's input legend widget, whose class is taken from one the game already has. The widget's own key icon only draws keys the game has a binding for, so the mod hides it and draws its own key cap in its place. That cap is a 30 by 30 square with the letter centred, matched to the game's key caps. It uses the game's key-cap art when available, and a light outlined box otherwise. Longer key names such as F10 get a wider box.
+- Until a legend widget exists (for example before the inventory is first opened), or if it cannot be used, the prompt falls back to the framed panel from 2.2.5 with the same "Switch Tool [X]" words.
+
 ## 2.2.5
 - **Equip prompt text no longer cut off.** The smaller font in 2.2.4 did not help. The panel's content area sits inside the frame art's padding and is shorter than a line of text. The text now sits over the whole panel, centred. The old placement is the fallback.
 - **No stray sparks around the prompt.** The game's panel plays ember and flourish effects meant for large windows. The prompt now hides them. With Debug on, the panel's widgets are logged once, so a missed effect can be named.

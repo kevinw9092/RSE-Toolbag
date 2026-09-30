@@ -18,7 +18,7 @@ SlotKeys = SHIFT
 # from your toolbag first, then your bag. "none" turns it off. Restart after a change.
 ToolKey = X
 
-# true = show "[X] Equip <tool>" while you face something your carried tool can work on.
+# true = show "Switch Tool [X]" while you face something your carried tool can work on.
 EquipPrompt = true
 
 # How close a rock or tree must be, in meters (it must also be in front of you). 1.5 to 6.

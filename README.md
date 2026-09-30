@@ -12,7 +12,7 @@ A 10-slot toolbag for your tools. Keep your pickaxe, axe, spade, watering can, c
   - **Store all tools** and **Take all out** buttons
 - **Shift+1 to Shift+0** equips toolbag slot 1 to 10. Set `SlotKeys` to change the modifier.
 - **Tool key (X).** Face a rock, tree, farm plot or fishing spot and press X. The best tool for the job comes out, from the toolbag first, then your bag.
-- **Equip prompt.** While you face something a tool you carry can work on, a small "[X] Equip Rune pickaxe" hint appears.
+- **Equip prompt.** While you face something a tool you carry can work on, a "Switch Tool [X]" hint appears, drawn like the game's own "Harvest [E]" prompts.
 - **Auto tool.** Hit a rock, tree or farm plot with the wrong item and the right tool comes out. This is from Expanded Inventory.
 
 ## Requirements

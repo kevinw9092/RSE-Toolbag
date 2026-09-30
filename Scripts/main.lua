@@ -6,13 +6,13 @@
 -- slot index where it was, so no items move on existing characters. The
 -- toolbag window lives in RSE-Dock's shared window beside the inventory.
 local TAG = "[RSE-Toolbag] "
-local VERSION = "2.2.5"
+local VERSION = "2.2.6"
 local MODMENU_ID = "RSE-Toolbag"
 
 local cfg = {
     SlotKeys = "SHIFT",          -- modifier for 1-0 that equips toolbag slots: SHIFT, CTRL, ALT or NONE
     ToolKey = "X",               -- equip the right tool for what you face; "none" turns it off
-    EquipPrompt = true,          -- "[X] Equip <tool>" hint near a rock, tree, farm plot or fishing spot
+    EquipPrompt = true,          -- "Switch Tool [X]" hint near a rock, tree, farm plot or fishing spot
     AutoTool = true,
     AutoToolFromWeapon = true,
     ToolReach = 3.0,
