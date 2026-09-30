@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.2.4
+- **Fixed a crash risk from stale cached game objects after the game unloaded them.** The same bug crashed RSE-Transmog. The toolbag window kept item icons, fonts, the game button class and the inventory slots used for its slot art between uses. The tool list kept item data objects. The game can unload those, and the next use would then touch freed memory. The mod now keeps only names and paths, and looks each object up again when it needs it. The icon cache is also cleared on every map load.
+- **Equip prompt text fits its frame.** The "[X] Equip ..." prompt used text too large for its panel, which cut off the bottom of the letters. The text is now smaller (14 instead of 18) and centred in the panel.
+
 ## 2.2.3
 - The toolbag slots now look like the inventory's empty slots: a slightly darker square over the window's own grain, with no framed slot art. The game's empty slots draw no texture of their own; every slot brush is empty, as `transmog_slotart` showed.
 

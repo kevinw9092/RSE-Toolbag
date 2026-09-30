@@ -53,6 +53,22 @@ local function debugLog(s) T.debugLog('[window] ' .. tostring(s)) end -- only wi
 local function valid(o) local k = type(o) return (k == 'userdata' or k == 'table') and o:IsValid() == true end
 local function get(fn) local ok, v = pcall(fn) if ok then return v end return nil end
 local function fullName(o) return valid(o) and (get(function() return o:GetFullName() end) or '') or '' end
+local function pathOf(o) return (fullName(o):match('^%S+%s+(.+)$')) or '' end
+
+-- Game objects are never kept between calls. The engine unloads assets and
+-- widgets that nothing of its own references, and a Lua table does not count:
+-- a cached object can be freed memory by the next use, and touching it
+-- crashes the game natively (RSE-Transmog, dumps 2026-09-30 15:57 to 18:50).
+-- Caches hold object paths (strings); the object is looked up again each time.
+local function loadObject(p)
+    if type(p) ~= 'string' or p == '' then return nil end
+    local o = get(function() return StaticFindObject(p) end)
+    if valid(o) then return o end
+    o = get(function() return LoadAsset(p) end)
+    if valid(o) then return o end
+    o = get(function() return StaticFindObject(p) end)
+    return valid(o) and o or nil
+end
 
 local tagCount = 0
 local function widget(kind, outer, tag)
@@ -89,15 +105,10 @@ local function add(parent, child)
     return parent:AddChild(child)
 end
 
-local fontCache = {}
 local function newText(tree, px, color, weight)
     local tb = widget('TextBlock', tree)
-    local kind = weight or 'regular'
-    if fontCache[kind] == nil then
-        local ok, f = pcall(LoadAsset, FONTS[kind])
-        fontCache[kind] = ok and valid(f) and f or false
-    end
-    pcall(function() if fontCache[kind] then tb.Font.FontObject = fontCache[kind] end end)
+    local f = loadObject(FONTS[weight or 'regular']) -- by path, never cached
+    pcall(function() if f then tb.Font.FontObject = f end end)
     pcall(function() tb.Font.Size = px end)
     pcall(function() tb:SetColorAndOpacity({ SpecifiedColor = color, ColorUseRule = 0 }) end)
     pcall(function() tb:SetTextOverflowPolicy(1) end)
@@ -108,7 +119,6 @@ local function setText(tb, s, cache, key)
     if pcall(function() tb:SetText(FText(s)) end) and cache then cache[key] = s end
 end
 
-local buttonClass = nil
 local UEH = nil
 pcall(function() UEH = require('UEHelpers') end)
 -- The game button left-aligns its label (a left padding plus a spacer taking
@@ -141,10 +151,8 @@ local function fitWidth(label, minW)
 end
 
 local function gameButton(view, parent, label, action, minW, minH)
-    if not valid(buttonClass) then
-        buttonClass = LoadAsset(BUTTON_CLASS)
-        assert(valid(buttonClass), 'game button class missing')
-    end
+    local buttonClass = loadObject(BUTTON_CLASS) -- by path, never cached
+    assert(valid(buttonClass), 'game button class missing')
     local library = StaticFindObject('/Script/UMG.Default__WidgetBlueprintLibrary')
     local b = get(function() return library:Create(UEH and UEH.GetWorld(), buttonClass, T.pc()) end)
     assert(valid(b), 'could not create a game button')
@@ -182,11 +190,14 @@ local function softPath(soft)
     return nil
 end
 
-local iconCache = {}
-local function iconOf(data)
-    if not valid(data) then return nil end
-    local key = fullName(data)
-    if iconCache[key] ~= nil then return iconCache[key] or nil end
+-- Icon texture PATH of an item data asset (by the data's path), or nil.
+-- Only paths are cached; the texture is looked up when it is drawn.
+local iconCache = {} -- item data path -> texture path, or false
+local function iconPathOf(dataPath)
+    if type(dataPath) ~= 'string' or dataPath == '' then return nil end
+    if iconCache[dataPath] ~= nil then return iconCache[dataPath] or nil end
+    local data = loadObject(dataPath)
+    if not data then return nil end -- not cached: may load later
     local tex = nil
     local soft = get(function() return data.Icon end)
     if soft then
@@ -201,8 +212,9 @@ local function iconOf(data)
             if valid(t) then tex = t end
         end
     end
-    iconCache[key] = tex or false
-    return tex
+    local texPath = tex and pathOf(tex) or ''
+    iconCache[dataPath] = texPath ~= '' and texPath or false
+    return iconCache[dataPath] or nil
 end
 
 -- --------------------------------------------------------------- slot art
@@ -219,7 +231,9 @@ end
 -- never created. Same code as RSE-Transmog
 -- (its `transmog_slotart` console command logs every candidate brush).
 local SLOT_CLASS = 'WBP_Inventory_ItemSlot_C'
-local slotSource, emptySource, slotSearched = nil, nil, -math.huge
+-- The source slots are remembered by path (strings) and looked up again on
+-- each use, never kept as objects.
+local slotSource, emptySource, slotSearched = nil, nil, -math.huge -- paths
 local slotArtLogged = {}
 
 local function paintable(brush)
@@ -233,26 +247,34 @@ local function isEmpty(s) return not valid(get(function() return s.ContainedItem
 
 -- Any live inventory slot, and an empty one (main grid first, then any), both
 -- searched again (at most every 2 s) once gone or no longer empty.
+local function lookUp(p)
+    if not p then return nil end
+    local o = get(function() return StaticFindObject(p) end)
+    return valid(o) and o or nil
+end
 local function findSlots()
-    local emptyOk = valid(emptySource) and isEmpty(emptySource)
-    if valid(slotSource) and emptyOk then return slotSource, emptySource end
+    local slot, empty = lookUp(slotSource), lookUp(emptySource)
+    local emptyOk = empty ~= nil and isEmpty(empty)
+    if slot and emptyOk then return slot, empty end
     if os.clock() - slotSearched >= 2 then
         slotSearched = os.clock()
-        local any, empty, emptyGrid
+        local any, emptyAny, emptyGrid
         for _, s in ipairs(get(function() return FindAllOf(SLOT_CLASS) end) or {}) do
             local n = valid(s) and fullName(s) or ''
             if n ~= '' and not n:find('Default__', 1, true) then
                 any = any or s
                 if not emptyGrid and isEmpty(s) then
                     -- The main grid's slots, not the quick-access bar's.
-                    if n:find('InventoryBody', 1, true) then emptyGrid = s else empty = empty or s end
+                    if n:find('InventoryBody', 1, true) then emptyGrid = s else emptyAny = emptyAny or s end
                 end
             end
         end
-        slotSource, emptySource = any, emptyGrid or empty
-        emptyOk = emptySource ~= nil
+        local e = emptyGrid or emptyAny
+        slotSource = any and pathOf(any) or nil
+        emptySource = e and pathOf(e) or nil
+        slot, empty, emptyOk = any, e, e ~= nil
     end
-    return valid(slotSource) and slotSource or nil, emptyOk and emptySource or nil
+    return slot, emptyOk and empty or nil
 end
 
 -- The brush a slot's root button (InternalRootButtonBase) draws now.
@@ -381,11 +403,20 @@ local function cell(view, grid, index, action, corner)
     return c
 end
 
-local function show(c, data)
-    c.data = data
-    local tex = data and iconOf(data) or nil
-    if tex ~= c.tex then
-        c.tex = tex
+-- Plain data of an item data object, read now: { name, label, path }.
+local function itemInfo(data)
+    if not valid(data) then return nil end
+    return { name = T.nameOf(data), label = T.displayName(data), path = pathOf(data) }
+end
+
+-- `item` is plain data { name, label, path } (see itemInfo), or nil. Cells
+-- keep only these strings, never the item data object.
+local function show(c, item)
+    c.data = item
+    local texPath = item and iconPathOf(item.path) or nil
+    if texPath ~= c.texPath then
+        local tex = texPath and loadObject(texPath)
+        c.texPath = tex and texPath or nil
         if tex then
             pcall(function() c.image:SetBrushFromTexture(tex, false) end)
             c.image:SetVisibility(HIT_TEST_INVISIBLE)
@@ -479,7 +510,7 @@ end
 local function refresh(view)
     local ready = T.ready()
     for k = 1, T.SLOTS do
-        show(view.slots[k], ready and T.dataAt(T.toolbagSlot(k)) or nil)
+        show(view.slots[k], ready and itemInfo(T.dataAt(T.toolbagSlot(k))) or nil)
     end
     local entries = {}
     if ready then
@@ -490,7 +521,7 @@ local function refresh(view)
     view.bagEntries = entries
     for j = 1, BAG_CELLS do
         local e = entries[j]
-        show(view.bag[j], e and e.data or nil)
+        show(view.bag[j], e and { name = e.name, label = e.label, path = e.path } or nil)
         local visible = e ~= nil
         if view.bag[j].visible ~= visible then
             view.bag[j].visible = visible
@@ -512,12 +543,12 @@ local function hover(view)
     for _, c in ipairs(view.cells) do
         local h = get(function() return c.hit:IsHovered() end) == true
         if h ~= c.hovered then c.hovered = h; paint(c) end
-        if h and c.data then label = T.displayName(c.data) end
+        if h and c.data then label = c.data.label end
     end
     local held = T.heldName()
     for k = 1, T.SLOTS do
         local c = view.slots[k]
-        local sel = c.data ~= nil and T.nameOf(c.data) == held
+        local sel = c.data ~= nil and c.data.name == held
         if sel ~= c.selected then c.selected = sel; paint(c) end
         if c.hovered and not c.data then label = STR.empty end
     end
@@ -551,7 +582,7 @@ local function register()
     local item = nil
     local best = T.tools().best
     for _, f in ipairs(T.FAMILY_ORDER) do
-        if best[f] then item = (fullName(best[f].data):match('^%S+%s+(.+)$')) break end
+        if best[f] and best[f].path ~= '' then item = best[f].path break end
     end
     if not item and Dock.inventoryOpen() then item = anyPickaxe() end
     if registered and (item == nil or item == iconItem) then return end
@@ -608,6 +639,7 @@ end
 -- Map loads: drop the cached inventory slots (slot art source) unread.
 function W.forget()
     slotSource, emptySource, slotSearched = nil, nil, -math.huge
+    iconCache = {} -- paths only; cleared on map load anyway, belt and braces
 end
 
 function W.start()

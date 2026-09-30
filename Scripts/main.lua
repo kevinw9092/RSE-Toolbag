@@ -6,7 +6,7 @@
 -- slot index where it was, so no items move on existing characters. The
 -- toolbag window lives in RSE-Dock's shared window beside the inventory.
 local TAG = "[RSE-Toolbag] "
-local VERSION = "2.2.3"
+local VERSION = "2.2.4"
 local MODMENU_ID = "RSE-Toolbag"
 
 local cfg = {
@@ -686,6 +686,13 @@ local function scanRanges()
 end
 
 -- Tools the player carries, cached for a second (the prompt asks 4 times a second).
+-- Entries hold plain data only (slot, names, the item data's path), never the
+-- item data object: a kept game object can be freed memory by the next use.
+local function objectPathOf(o)
+    if not isValidObj(o) then return "" end
+    local ok, f = pcall(function() return o:GetFullName() end)
+    return ok and type(f) == "string" and (f:match("^%S+%s+(.+)$") or "") or ""
+end
 local toolCache, toolCacheAt = nil, -10
 local function scanTools(pc, now)
     now = now or os.clock()
@@ -701,7 +708,8 @@ local function scanTools(pc, now)
                     local family = toolFamilyOf(name)
                     if family then
                         local power = tonumber((safeGet(data, "PowerLevel"))) or 0
-                        local entry = { slot = i, power = power, data = data, name = name, family = family, toolbag = isToolbagSlot(i) }
+                        local entry = { slot = i, power = power, name = name, label = displayName(data),
+                            path = objectPathOf(data), family = family, toolbag = isToolbagSlot(i) }
                         all[#all + 1] = entry
                         local cur = found[family]
                         -- Best tool per family, the toolbag's copy first on a tie.
@@ -918,16 +926,11 @@ local WORLD_SETTLE = 2
 
 local toolLists = {}
 local toolReadyAt = nil
-local scriptClasses = {}
-
+-- Looked up by path each time, never cached: a kept game object can be freed
+-- memory by the next use (RSE-Transmog crashes, 2026-09-30).
 local function scriptClass(path)
-    local c = scriptClasses[path]
-    if isValidObj(c) then return c end
     local ok, found = pcall(function() return StaticFindObject(path) end)
-    if ok and isValidObj(found) then
-        scriptClasses[path] = found
-        return found
-    end
+    if ok and isValidObj(found) then return found end
     return nil
 end
 
@@ -1325,7 +1328,7 @@ end
 -- What ui.lua and prompt.lua may use.
 local T = {
     cfg = cfg, log = log, debugLog = debugLog, SLOTS = TOOLBAG_SLOTS, FAMILY_ORDER = FAMILY_ORDER,
-    isValid = isValidObj, nameOf = nameOf, displayName = displayName,
+    isValid = isValidObj, nameOf = nameOf, displayName = displayName, pathOf = objectPathOf,
     pc = function() return lastPc end,
     ready = function() return layout ~= nil end,
     layout = function() return layout end,

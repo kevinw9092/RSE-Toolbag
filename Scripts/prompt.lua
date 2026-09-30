@@ -6,6 +6,11 @@ local T = require('toolbag_core')
 
 local P = {}
 local WIDTH, HEIGHT = 420, 76
+-- Text size: 18 was taller than the panel's content area and the bottom of the
+-- letters was cut off. 14 fits with a small margin; the text is also centred
+-- vertically (and horizontally) in the panel.
+local FONT_SIZE = 14
+local H_CENTER, V_CENTER = 2, 2
 local HIT_TEST_INVISIBLE, COLLAPSED = 3, 1
 local GOLD = { R = 0.96, G = 0.82, B = 0.50, A = 1 }
 
@@ -30,9 +35,24 @@ local function build(pc)
     local frame = wbl:Create(pc, panelC, pc)
     assert(valid(frame), 'could not create the prompt panel')
     local text = StaticConstructObject(textC, frame.WidgetTree)
-    pcall(function() local f = text.Font; f.Size = 18; text:SetFont(f) end)
+    pcall(function() local f = text.Font; f.Size = FONT_SIZE; text:SetFont(f) end)
     pcall(function() text:SetColorAndOpacity({ SpecifiedColor = GOLD, ColorUseRule = 0 }) end)
-    frame.PanelContent:AddChild(text)
+    pcall(function() text:SetJustification(1) end) -- 1 = centre
+    -- Centred in the panel through an invisible Border (the panel's content
+    -- slot cannot align its child); the text goes in directly if that fails.
+    local placed = pcall(function()
+        local box = StaticConstructObject(StaticFindObject('/Script/UMG.Border'), frame.WidgetTree)
+        box:SetBrushColor({ R = 0, G = 0, B = 0, A = 0 })
+        box:SetPadding({ Left = 12, Top = 2, Right = 12, Bottom = 2 })
+        box:SetHorizontalAlignment(H_CENTER)
+        box:SetVerticalAlignment(V_CENTER)
+        box:SetContent(text)
+        frame.PanelContent:AddChild(box)
+    end)
+    if not placed then
+        pcall(function() text:RemoveFromParent() end)
+        frame.PanelContent:AddChild(text)
+    end
     frame:AddToViewport(50)
     frame:SetVisibility(COLLAPSED)
     -- Bottom centre, above the health and stamina bars.
@@ -77,7 +97,7 @@ function P.tick(now)
         end
         view = result
     end
-    local line = string.format('[%s]  Equip %s', key:upper(), T.displayName(s.tool.data))
+    local line = string.format('[%s]  Equip %s', key:upper(), s.tool.label or s.tool.name or '?')
     if line ~= view.textShown then
         view.textShown = line
         pcall(function() view.text:SetText(FText(line)) end)
