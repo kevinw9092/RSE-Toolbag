@@ -6,7 +6,7 @@
 -- slot index where it was, so no items move on existing characters. The
 -- toolbag window lives in RSE-Dock's shared window beside the inventory.
 local TAG = "[RSE-Toolbag] "
-local VERSION = "2.1.0"
+local VERSION = "2.2.0"
 local MODMENU_ID = "RSE-Toolbag"
 
 local cfg = {
@@ -329,7 +329,9 @@ local function growForToolbag(o, label)
     end
     if maxBefore < total then pcall(function() o:SetPropertyValue("MaxSlotCount", total) end) end
     result.total, result.first, result.pageType = total, total - TOOLBAG_SLOTS, list[#list].type
-    if method ~= "already there" or label ~= "template" then
+    local logKey = label .. ":" .. describePages(list)
+    if method ~= "already there" or (label ~= "template" and not refused[logKey]) then
+        refused[logKey] = true
         log(string.format("%s: toolbag tab (type %d) %s, tabs %s, toolbag = slots %d-%d, MaxSlotCount %s -> %s",
             label, result.pageType, method, describePages(list), result.first, total - 1,
             tostring(maxBefore), tostring(safeGet(o, "MaxSlotCount"))))
@@ -378,6 +380,68 @@ local lastPc = nil
 local invChecked = false
 local worldGen = 0
 
+-- The world's network role for a controller: "standalone" (solo, offline),
+-- "host" (listen server or dedicated server), "client" (joined someone else's
+-- world) or "unknown".
+local function netModeOf(pc)
+    local kismet = StaticFindObject("/Script/Engine.Default__KismetSystemLibrary")
+    local world = nil
+    pcall(function() world = pc:GetWorld() end)
+    if not world then return "unknown" end
+    local okA, alone = pcall(function() return kismet:IsStandalone(world) end)
+    if okA and alone == true then return "standalone" end
+    local okS, server = pcall(function() return kismet:IsServer(world) end)
+    if okS and server == true then return "host" end
+    if okS and server == false then return "client" end
+    return "unknown"
+end
+
+-- Grows a loaded inventory's slot array to `total` (only on the side that owns
+-- it: solo, the host, or a dedicated server). Never shrinks. Returns true when
+-- the inventory has at least `total` slots afterwards.
+local function growSlots(inv, total, label)
+    local n = slotCount(inv)
+    if type(n) ~= "number" then return false end
+    if n >= total then return true end
+    local fn = findFunction(inv, "SetMaxSlotCount")
+    local ps = fn and inputParams(fn) or {}
+    if not (fn and #ps >= 1 and NUMERIC[ps[1].kind]) then
+        log(label .. ": SetMaxSlotCount was not found; toolbag off")
+        return false
+    end
+    local ok, err = pcall(function()
+        if #ps >= 2 and ps[2].kind == "BoolProperty" then inv:SetMaxSlotCount(total, false) else inv:SetMaxSlotCount(total) end
+    end)
+    log(string.format("%s: inventory had %d < %d slots, SetMaxSlotCount -> %s%s", label, n, total,
+        tostring(slotCount(inv)), ok and "" or (" ERROR: " .. tostring(err))))
+    return ok and (slotCount(inv) or 0) >= total
+end
+
+-- Messages between the server's and the players' RSE-Toolbag, over two stock
+-- engine RPCs every PlayerController has (the same channel RSE-Transmog uses):
+--   server -> player  ClientMessage("rsetb1 ready <slots> <mode>")  the toolbag slots are in place
+--   player -> server  ServerExec("rsetb1 hi")                      "I am waiting": the server answers
+--                                                                   at once if it is already done
+local PROTO = "rsetb1"
+local GUEST_TIMEOUT = 60        -- s without a "ready": the host has no RSE-Toolbag
+local READY_RETRIES = 10        -- the grown slot array can arrive a moment after the message
+local guestWait = nil           -- { deadline, signalled, tries, nextTry } while a guest waits
+local readySignal = nil         -- set by the ClientMessage hook, handled in the game-thread tick
+
+-- FString parameters arrive as a Lua string or an FString object, depending on the UE4SS build.
+local function textOf(param)
+    local ok, v = pcall(function() return param:get() end)
+    if ok and type(v) == "string" then return v end
+    local okS, s = pcall(function() return v:ToString() end)
+    if okS and type(s) == "string" then return s end
+    okS, s = pcall(function() return param:ToString() end)
+    return okS and type(s) == "string" and s or nil
+end
+
+local function tellPlayer(pc, message)
+    pcall(function() pc:ClientMessage(message, FName("None"), 0.0) end)
+end
+
 local function checkInventory()
     if invChecked or not isValidObj(lastPc) then return end
     local pawn = nil
@@ -393,36 +457,148 @@ local function checkInventory()
     if not l then return end
     local n = slotCount(inv)
     if type(n) == "number" and n < l.total then
+        local net = netModeOf(lastPc)
         local okH, auth = pcall(function() return lastPc:HasAuthority() end)
-        -- The world's own view, for the log and as a second opinion: a standalone (solo, offline)
-        -- or listen-server world is the host even when the controller's check says otherwise.
-        local kismet = StaticFindObject("/Script/Engine.Default__KismetSystemLibrary")
-        local world = nil
-        pcall(function() world = lastPc:GetWorld() end)
-        local okS, server = pcall(function() return kismet:IsServer(world) end)
-        local okA, alone = pcall(function() return kismet:IsStandalone(world) end)
-        local net = (okA and alone == true) and "standalone" or ((okS and server == true) and "host" or ((okS and server == false) and "client" or "unknown"))
-        log(string.format("inventory has %d slots, layout wants %d; net mode %s, controller authority %s",
-            n, l.total, net, okH and tostring(auth) or "unreadable"))
-        if not ((okH and auth == true) or net == "standalone" or net == "host") then
-            -- Co-op guest: the host decides the layout and must run the mod too.
-            log(string.format("toolbag off: %d slots < %d on a co-op guest; the host needs RSE-Toolbag too", n, l.total))
+        if (okH and auth == true) or net == "standalone" or net == "host" then
+            if not growSlots(inv, l.total, "player") then return end
+        else
+            -- Guest: nothing to poll. The server says when the slots are in place (guestTick).
+            if not guestWait then
+                guestWait = { deadline = os.clock() + GUEST_TIMEOUT, tries = 0 }
+                log(string.format("co-op guest (net mode %s): %d of %d slots; waiting for the host's RSE-Toolbag", net, n, l.total))
+                pcall(function() lastPc:ServerExec(PROTO .. " hi") end)
+            end
             return
         end
-        local fn = findFunction(inv, "SetMaxSlotCount")
-        local ps = fn and inputParams(fn) or {}
-        if not (fn and #ps >= 1 and NUMERIC[ps[1].kind]) then
-            log("toolbag off: SetMaxSlotCount was not found")
-            return
-        end
-        local ok, err = pcall(function()
-            if #ps >= 2 and ps[2].kind == "BoolProperty" then inv:SetMaxSlotCount(l.total, false) else inv:SetMaxSlotCount(l.total) end
-        end)
-        log(string.format("loaded inventory had %d < %d slots, SetMaxSlotCount -> %s%s", n, l.total, tostring(slotCount(inv)),
-            ok and "" or (" ERROR: " .. tostring(err))))
-        if not ok or (slotCount(inv) or 0) < l.total then return end
     end
+    if guestWait then log("the host added the toolbag slots; toolbag ready") guestWait = nil end
     layout = l
+end
+
+-- Runs in the game-thread tick while a guest waits: re-checks only when the
+-- server's "ready" arrived (a few quick retries, as the slots may trail the
+-- message), or once when the timeout passes.
+local function guestTick(now)
+    local w = guestWait
+    if not w or not isValidObj(lastPc) then return end
+    if readySignal then
+        if readySignal.mode ~= tostring(cfg.ToolbagMode):lower() then
+            log("note: the host uses ToolbagMode = " .. readySignal.mode .. ", this game " .. tostring(cfg.ToolbagMode)
+                .. "; the slots line up, but set the same mode on both")
+        end
+        readySignal = nil
+        w.signalled, w.tries, w.nextTry = true, 0, now
+    end
+    local final = now >= w.deadline
+    if not (final or (w.signalled and now >= w.nextTry)) then return end
+    invChecked = false
+    checkInventory()
+    if layout or not guestWait then return end
+    if w.signalled and w.tries < READY_RETRIES then
+        w.tries, w.nextTry = w.tries + 1, now + 0.5
+        return
+    end
+    log(w.signalled and "toolbag off: the host said ready, but the slots never arrived"
+        or string.format("toolbag off: no answer from the host in %d s; the host or dedicated server needs RSE-Toolbag "
+            .. "with the same ToolbagMode", GUEST_TIMEOUT))
+    guestWait = nil
+end
+
+-- ------------------------------------------------------------- server mode
+-- On a host or dedicated server, every OTHER player's inventory lives here too.
+-- Each connected controller is checked every few seconds: once its pawn and
+-- saved inventory have loaded, the toolbag tab is added and the slot array
+-- grown. The check keeps running (every 30 s once done) because a later load
+-- of the character's save could shrink the array again. Only ever grows.
+local SERVER_SCAN = 5          -- seconds between scans of the connected controllers
+local SERVER_SETTLE = 4        -- seconds after a controller appears before its first check
+local SERVER_RECHECK = 30      -- seconds between checks once a player is done
+local serverMode = nil         -- nil: not known yet for this world
+local serverPlayers = {}       -- controller address -> { firstSeen, nextCheck, done, label }
+local nextServerScan = 0
+
+local function playerLabel(pc)
+    local ok, name = pcall(function() return pc.PlayerState:GetPlayerName():ToString() end)
+    if ok and type(name) == "string" and name ~= "" then return "player " .. name end
+    return "player " .. nameOf(pc)
+end
+
+local function isLocal(pc)
+    local ok, v = pcall(function() return pc:IsLocalController() end)
+    return ok and v == true
+end
+
+local function serverPrepare(pc, st)
+    st.total = nil
+    local pawn = nil
+    pcall(function() pawn = pc.Pawn end)
+    if not isPlayerCharacter(pawn) then return false end
+    local inv = safeGet(pc, INVENTORY_PROPERTY)
+    local n = isValidObj(inv) and slotCount(inv)
+    if type(n) ~= "number" or n == 0 then return false end
+    local l = growForToolbag(inv, st.label)
+    if not l then return false end
+    st.total = l.total
+    return growSlots(inv, l.total, st.label)
+end
+
+-- New controllers are reported by the game as they are created (no object scan);
+-- one full scan runs the first time server mode is confirmed, for players who
+-- were already connected (a hot reload, or the mod starting late).
+local newControllers = {}
+pcall(NotifyOnNewObject, "/Script/Engine.PlayerController", function(pc)
+    newControllers[#newControllers + 1] = pc
+end)
+local controllers = {}          -- address -> controller, this world's
+local scannedOnce = false
+
+local function serverTick(now)
+    if serverMode == false or now < nextServerScan then return end
+    nextServerScan = now + SERVER_SCAN
+    while #newControllers > 0 do
+        local pc = table.remove(newControllers)
+        if isValidObj(pc) and not nameOf(pc):find("^Default__") then controllers[pc:GetAddress()] = pc end
+    end
+    if serverMode == nil then
+        for _, pc in pairs(controllers) do
+            if isValidObj(pc) then
+                local net = netModeOf(pc)
+                if net ~= "unknown" then serverMode = (net == "host") break end
+            end
+        end
+        if serverMode == nil then return end
+    end
+    if not serverMode then return end
+    if not scannedOnce then
+        scannedOnce = true
+        log("server mode: adding the toolbag slots to joining players' inventories")
+        local ok, all = pcall(FindAllOf, "PlayerController")
+        for _, pc in ipairs(ok and all or {}) do
+            if isValidObj(pc) and not nameOf(pc):find("^Default__") then controllers[pc:GetAddress()] = pc end
+        end
+    end
+    for key, pc in pairs(controllers) do
+        if not isValidObj(pc) then
+            controllers[key], serverPlayers[key] = nil, nil      -- left the game
+        elseif not isLocal(pc) then
+            local st = serverPlayers[key]
+            if not st then
+                st = { firstSeen = now, nextCheck = now + SERVER_SETTLE }
+                serverPlayers[key] = st
+            end
+            if now >= st.nextCheck then
+                st.label = playerLabel(pc)
+                local okP, done = pcall(serverPrepare, pc, st)
+                if not okP then log(st.label .. ": " .. tostring(done)) done = false end
+                if done and not st.done then
+                    log(st.label .. ": toolbag ready")
+                    tellPlayer(pc, string.format("%s ready %d %s", PROTO, st.total or 0, tostring(cfg.ToolbagMode):lower()))
+                end
+                st.done = done
+                st.nextCheck = now + (done and SERVER_RECHECK or SERVER_SCAN)
+            end
+        end
+    end
 end
 
 -- ------------------------------------------------------------------ items
@@ -1188,12 +1364,46 @@ local function forgetWorld()
     toolLists = {}
     pendingSwap = nil
     moveQueue, moveBusy, reserved = {}, nil, {}
+    serverMode, serverPlayers, nextServerScan = nil, {}, 0
+    guestWait, readySignal = nil, nil
+    controllers, scannedOnce = {}, false
     forgetTools()
     if Prompt then pcall(Prompt.forget) end
 end
 
 pcall(RegisterLoadMapPreHook, function() forgetWorld() end)
-pcall(RegisterInitGameStatePostHook, function() pcall(patchInventoryTemplate) end)
+
+-- Player side: the server's "ready". On a host the hook also fires for messages it sends
+-- to other players; only the local controller's count.
+pcall(RegisterHook, "/Script/Engine.PlayerController:ClientMessage", function(ctx, message)
+    local text = textOf(message)
+    if not text or text:sub(1, #PROTO + 1) ~= PROTO .. " " then return end
+    local pc = ctx:get()
+    if not isLocal(pc) then return end
+    local total, mode = text:match("^" .. PROTO .. " ready (%d+) (%S+)")
+    if total then readySignal = { total = tonumber(total), mode = mode } end
+end)
+
+-- Server side: a waiting player's "hi". Answer now if that player is done, else check them now.
+pcall(RegisterHook, "/Script/Engine.PlayerController:ServerExec", function(ctx, message)
+    local text = textOf(message)
+    if text ~= PROTO .. " hi" then return end
+    local pc = ctx:get()
+    if not isValidObj(pc) then return end
+    local key = pc:GetAddress()
+    controllers[key] = pc
+    local st = serverPlayers[key]
+    if st and st.done then
+        tellPlayer(pc, string.format("%s ready %d %s", PROTO, st.total or 0, tostring(cfg.ToolbagMode):lower()))
+    elseif st then
+        st.nextCheck = 0
+    end
+end)
+pcall(RegisterInitGameStatePostHook, function()
+    -- Game modes only exist on the server; serverTick then tells a host (other players can
+    -- join) from a standalone world (nobody else, the local path is enough).
+    pcall(patchInventoryTemplate)
+end)
 pcall(RegisterLoadMapPostHook, function() pcall(patchInventoryTemplate) end)
 
 RegisterHook("/Script/Engine.PlayerController:ClientRestart", function(self)
@@ -1289,9 +1499,19 @@ end
 local UEH = nil
 pcall(function() UEH = require("UEHelpers") end)
 local function findPlayerFallback(now)
-    if isValidObj(lastPc) or not UEH then return end
-    local ok, pc = pcall(UEH.GetPlayerController)
-    if not ok or not isValidObj(pc) then return end
+    if isValidObj(lastPc) then return end
+    -- The controllers the game reported (see server mode) first: no lookup needed.
+    local pc = nil
+    for _, c in pairs(controllers) do
+        if isValidObj(c) and isLocal(c) then pc = c break end
+    end
+    if not pc then
+        -- A dedicated server has no local player: never ask UEHelpers there (it can scan objects).
+        if serverMode or not UEH then return end
+        local ok, found = pcall(UEH.GetPlayerController)
+        if not ok or not isValidObj(found) or not isLocal(found) then return end   -- a host also holds other players' controllers
+        pc = found
+    end
     local pawn = nil
     pcall(function() pawn = pc.Pawn end)
     if not isPlayerCharacter(pawn) then return end
@@ -1307,7 +1527,13 @@ local function tick()
     ticks = ticks + 1
     pcall(modMenuSync)
     if ticks % 20 == 0 then pcall(findPlayerFallback, os.clock()) end
+    local okSv, errSv = pcall(serverTick, os.clock())
+    if not okSv and ticks % 50 == 0 then log("server mode: " .. tostring(errSv)) end
     if not invChecked and isValidObj(lastPc) and ticks % 50 == 0 then pcall(checkInventory) end
+    if guestWait then
+        local okG, errG = pcall(guestTick, os.clock())
+        if not okG then log("guest wait: " .. tostring(errG)) guestWait = nil end
+    end
     local now = os.clock()
     keyTick(now)
     local okM, errM = pcall(processMoves, now)

@@ -30,7 +30,7 @@ The toolbag is a **hidden fifth inventory tab** of 10 slots, added after the bag
 
 Rules:
 - **Before switching back to `off`, or removing the mod**, click **Take all out**. Without the fifth tab, anything in it can be lost.
-- **Co-op:** the host decides the inventory layout. The host and every guest need the mod with the same `ToolbagMode`.
+- **Co-op and dedicated servers:** the host or server owns everyone's inventory. It needs RSE-Toolbag with the same `ToolbagMode` as the players. Its server mode then adds the toolbag slots for each player who joins. The server tells each guest's game when their slots are ready. With no answer within a minute, storage stays off.
 - The mod only adds the tab when the four vanilla tabs have vanilla sizes. If another inventory-size mod changed them, the toolbag stays off and the log says why.
 - Version 2.0.0 grew the quest tab instead. That crashed the game, because the quest tab's screen holds exactly 72 slots. 2.1.0 never changes an existing tab.
 
