@@ -3,7 +3,7 @@
   "id": "RSE-Toolbag",
   "name": "RSE-Toolbag",
   "author": "notto0606, RSE contributors",
-  "version": "2.2.6",
+  "version": "2.3.0",
   "description": "A 10-slot toolbag beside the inventory (needs RSE-Dock). Shift+1-0 equips a slot, and the tool key takes out the right tool for what you face. Empty the toolbag before removing the mod.",
   "settings": [
     {
@@ -50,6 +50,35 @@
       "tooltip": "Face a rock, tree, farm plot or fishing spot and press it: the best tool comes out, toolbag first. Pick None to turn it off."
     },
     {
+      "key": "QuickRow",
+      "type": "toggle",
+      "label": "Show the toolbag row",
+      "default": true,
+      "tooltip": "The 10 toolbag slots with their tools and the SHIFT + number keys that take them out."
+    },
+    {
+      "key": "QuickRowPosition",
+      "type": "choice",
+      "label": "Toolbag row position",
+      "options": [
+        "Above health",
+        "Below health",
+        "Above action bar"
+      ],
+      "default": "Above health",
+      "tooltip": "Show the toolbag row above or below the health bars, or above the 1-8 action bar (slots 1-8 only there)."
+    },
+    {
+      "key": "QuickRowOffset",
+      "type": "slider",
+      "label": "Toolbag row height",
+      "min": -300,
+      "max": 300,
+      "step": 5,
+      "default": 0,
+      "tooltip": "Moves the toolbag row up (+) or down (-)."
+    },
+    {
       "key": "EquipPrompt",
       "type": "toggle",
       "label": "Show equip prompt",
@@ -67,6 +96,18 @@
       "suffix": " m",
       "default": 3,
       "tooltip": "How close a rock or tree must be, in front of you."
+    },
+    {
+      "key": "VineTool",
+      "type": "choice",
+      "label": "Tool for vines",
+      "options": [
+        "axe",
+        "pickaxe",
+        "spade"
+      ],
+      "default": "axe",
+      "tooltip": "Cuttable vines (thorny vines across entrances, vines over wells) take out this tool."
     },
     {
       "key": "UseCompost",

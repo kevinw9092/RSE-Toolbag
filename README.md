@@ -11,9 +11,10 @@ A 10-slot toolbag for your tools. Keep your pickaxe, axe, spade, watering can, c
   - click a toolbag slot to take its tool out
   - **Store all tools** and **Take all out** buttons
 - **Shift+1 to Shift+0** equips toolbag slot 1 to 10. Set `SlotKeys` to change the modifier.
-- **Tool key (X).** Face a rock, tree, farm plot or fishing spot and press X. The best tool for the job comes out, from the toolbag first, then your bag.
+- **Tool key (X).** Face a rock, tree, farm plot, fishing spot or cuttable vine and press X. The best tool for the job comes out, from the toolbag first, then your bag.
 - **Equip prompt.** While you face something a tool you carry can work on, a "Switch Tool [X]" hint appears, drawn like the game's own "Harvest [E]" prompts.
-- **Auto tool.** Hit a rock, tree or farm plot with the wrong item and the right tool comes out. This is from Expanded Inventory.
+- **Toolbag row.** The 10 toolbag slots on the HUD, with their tools, numbers and durability, and a faded SHIFT key cap: above the health bars, below them, or above the 1-8 action bar (slots 1-8 there).
+- **Auto tool.** Hit a rock, tree, farm plot or vine with the wrong item and the right tool comes out. This is from Expanded Inventory.
 
 ## Requirements
 - UE4SS for RuneScape: Dragonwilds (a recent experimental build)
@@ -43,6 +44,10 @@ Rules:
 | `EquipPrompt` | `true` | show the equip hint |
 | `ToolReach` | `3.0` | how close a rock or tree must be, in meters (1.5 to 6) |
 | `UseCompost` | `true` | compost bucket for watered farm plots |
+| `VineTool` | `axe` | tool for cuttable vines and choppable blockers |
+| `QuickRow` | `true` | show the toolbag row on the HUD |
+| `QuickRowPosition` | `Above health` | `Above health`, `Below health` or `Above action bar` (slots 1-8 there) |
+| `QuickRowOffset` | `0` | move the row up (+) or down (-), -300 to 300 |
 | `AutoTool` | `true` | the right tool comes out when you hit with the wrong one |
 | `AutoToolFromWeapon` | `true` | auto tool also from melee weapons, only right in front of you |
 | `BagFirst` | `false` | pickups go to the bag instead of empty hotbar slots |

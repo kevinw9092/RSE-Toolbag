@@ -6,7 +6,7 @@
 -- slot index where it was, so no items move on existing characters. The
 -- toolbag window lives in RSE-Dock's shared window beside the inventory.
 local TAG = "[RSE-Toolbag] "
-local VERSION = "2.2.6"
+local VERSION = "2.3.0"
 local MODMENU_ID = "RSE-Toolbag"
 
 local cfg = {
@@ -17,11 +17,15 @@ local cfg = {
     AutoToolFromWeapon = true,
     ToolReach = 3.0,
     UseCompost = true,
+    VineTool = "axe",            -- tool for cuttable vines and choppable blockers
     BagFirst = false,
     ToolbagMode = "off",         -- toolbag storage: off, private or items (see README; restart after a change)
+    QuickRow = true,             -- the toolbag slots shown above the hotbar
+    QuickRowPosition = "Above health", -- "Above health", "Below health" or "Above action bar"
+    QuickRowOffset = 0,          -- move that row up (+) or down (-), in UI units, -300 to 300
     Debug = false,
 }
-local LIVE_KEYS = { "EquipPrompt", "AutoTool", "AutoToolFromWeapon", "ToolReach", "UseCompost", "BagFirst", "Debug" }
+local LIVE_KEYS = { "QuickRow", "QuickRowPosition", "QuickRowOffset", "EquipPrompt", "AutoTool", "AutoToolFromWeapon", "ToolReach", "UseCompost", "VineTool", "BagFirst", "Debug" }
 
 local PLAYER_CONTROLLER = "/Game/Gameplay/Character/Player/BP_PlayerController.BP_PlayerController_C"
 local INVENTORY_TEMPLATE = PLAYER_CONTROLLER .. ":BP_Components_Inventory_GEN_VARIABLE"
@@ -636,6 +640,42 @@ local function itemDataAt(comp, slot)
     return nil
 end
 
+-- Durability of the item in a slot, 0-1, or nil for items without durability.
+-- Names from the game: the item's Durability, the item data's bHasDurability and
+-- BaseDurability / GetMaxDurability. The first combination that works is logged
+-- once with Debug on.
+local durabilityLogged = false
+local function durabilityOf(item, data)
+    if not item or not isValidObj(data) then return nil end
+    local okH, has = pcall(function() return data.bHasDurability end)
+    if okH and has == false then return nil end
+    local cur, curFrom = nil, nil
+    for _, field in ipairs({ "Durability", "CurrentDurability" }) do
+        local ok, v = pcall(function() return item[field] end)
+        if ok and type(v) == "number" then cur, curFrom = v, "item." .. field break end
+    end
+    if not cur then return nil end
+    local max, maxFrom = nil, nil
+    for _, read in ipairs({
+        { "data.BaseDurability", function() return data.BaseDurability end },
+        { "data.MaxDurability", function() return data.MaxDurability end },
+        { "data:GetMaxDurability()", function() return data:GetMaxDurability() end },
+        { "data:GetBaseDurability()", function() return data:GetBaseDurability() end },
+    }) do
+        local ok, v = pcall(read[2])
+        if ok and type(v) == "number" and v > 0 then max, maxFrom = v, read[1] break end
+    end
+    local frac
+    if max then frac = cur / max
+    elseif cur <= 1 then frac, maxFrom = cur, "none (value is already 0-1)"
+    else return nil end
+    if not durabilityLogged then
+        durabilityLogged = true
+        debugLog(string.format("durability read from %s / %s (%s: %.2f)", curFrom, tostring(maxFrom), nameOf(data), frac))
+    end
+    return math.max(0, math.min(1, frac))
+end
+
 local function stackOf(item)
     for _, field in ipairs({ "Quantity", "Count", "StackSize", "Amount" }) do
         local ok, v = pcall(function() return item[field] end)
@@ -913,7 +953,13 @@ end
 
 -- ----------------------------------------------------------- work targets
 local KIND_FAMILY = { rock = "pickaxe", tree = "axe", rod = "rod", net = "net" }
-local SCAN_CLASS = { rock = "DestructibleWorldActor", tree = "FellableTree", fish = "FishingNodeV2" }
+-- Cuttable vines and other choppable blockers (the thorny vines across entrances, the
+-- vines over wells and pools): their blueprints, from the game's asset list (2026-09-30).
+-- Any other class with "Vine" or "Choppable" in its name counts too, except the Wild
+-- Jade Vine enemy and anything that is a pawn (a creature).
+local VINE_CLASSES = { "BP_ThornyVine_C", "BP_InfectedThornyVine_C", "BP_CleansingPool_Vines_C",
+    "BP_DragonImaru_Vines_C", "BP_Choppable_BloodwoodSap_C" }
+local SCAN_CLASS = { rock = "DestructibleWorldActor", tree = "FellableTree", fish = "FishingNodeV2", vine = VINE_CLASSES }
 local DETECTOR_CLASS = "/Script/Dominion.InteractableDetectorComponent"
 local FARM_SLOT_CLASS = "/Script/Dominion.FarmSlotComponent"
 local RESPAWN_CLASS = "/Script/Dominion.ResourceRespawnComponent"
@@ -968,9 +1014,31 @@ local function isDepleted(actor)
     return ok and tonumber(left) ~= nil and tonumber(left) <= 0
 end
 
+local function isVineClass(cls)
+    if cls:find("WildJade", 1, true) or cls:find("WildVine", 1, true) or cls:find("AI_", 1, true) then return false end
+    return cls:find("Vine", 1, true) ~= nil or cls:find("Choppable", 1, true) ~= nil
+end
+
+local function isPawn(actor)
+    local ok, v = pcall(function() return actor:IsA("/Script/Engine.Pawn") end)
+    return ok and v == true
+end
+
+-- The tool for vines: VineTool (config), one of the tool families; axe by default.
+local function vineFamily()
+    local f = tostring(cfg.VineTool or "axe"):lower()
+    return TOOL_PREFIX[f] and f or "axe"
+end
+local function familyFor(kind) return kind == "vine" and vineFamily() or KIND_FAMILY[kind] end
+
+local vineLogged = false
 local function kindOf(actor)
     if componentOf(actor, FARM_SLOT_CLASS) then return "plot" end
     local cls = classNameOf(actor)
+    if isVineClass(cls) and not isPawn(actor) then
+        if not vineLogged then vineLogged = true debugLog("vine target: " .. cls .. " -> " .. vineFamily()) end
+        return "vine"
+    end
     if cls:find("FishingNode", 1, true) then return cls:find("_Net_", 1, true) and "net" or "rod" end
     if cls:find("Tree", 1, true) then return "tree" end
     if isRockClass(cls) then return "rock" end
@@ -993,13 +1061,19 @@ local function candidates(kind, me, now)
     end
     list = { at = now, x = me.X, y = me.Y, items = {} }
     toolLists[kind] = list
-    local ok, all = pcall(FindAllOf, SCAN_CLASS[kind])
-    if not ok or type(all) ~= "table" then return list.items end
-    for _, a in pairs(all) do
-        if isValidObj(a) and not nameOf(a):find("^Default__") and (kind ~= "rock" or isRockClass(classNameOf(a))) then
-            local l = locationOf(a)
-            if l and math.sqrt((l.X - me.X) ^ 2 + (l.Y - me.Y) ^ 2) < SCAN_RADIUS then
-                list.items[#list.items + 1] = { actor = a, x = l.X, y = l.Y }
+    local classes = SCAN_CLASS[kind]
+    if type(classes) ~= "table" then classes = { classes } end
+    for _, className in ipairs(classes) do
+        local ok, all = pcall(FindAllOf, className)
+        if ok and type(all) == "table" then
+            for _, a in pairs(all) do
+                if isValidObj(a) and not nameOf(a):find("^Default__") and (kind ~= "rock" or isRockClass(classNameOf(a)))
+                    and (kind ~= "vine" or not isPawn(a)) then
+                    local l = locationOf(a)
+                    if l and math.sqrt((l.X - me.X) ^ 2 + (l.Y - me.Y) ^ 2) < SCAN_RADIUS then
+                        list.items[#list.items + 1] = { actor = a, x = l.X, y = l.Y }
+                    end
+                end
             end
         end
     end
@@ -1036,10 +1110,12 @@ local function findWorkTarget(pc, pawn, now)
     if kind then return aimed, kind end
     local me = locationOf(pawn)
     if not me then return nil end
-    local rock, rockScore = nearestInFront("rock", pc, me, now)
-    local tree, treeScore = nearestInFront("tree", pc, me, now)
-    if rock and (not tree or rockScore <= treeScore) then return rock, "rock" end
-    if tree then return tree, "tree" end
+    local best, bestKind, bestScore = nil, nil, nil
+    for _, kind in ipairs({ "rock", "tree", "vine" }) do
+        local a, score = nearestInFront(kind, pc, me, now)
+        if a and (not bestScore or score < bestScore) then best, bestKind, bestScore = a, kind, score end
+    end
+    if best then return best, bestKind end
     local spot = nearestInFront("fish", pc, me, now)
     if spot then return spot, classNameOf(spot):find("_Net_", 1, true) and "net" or "rod" end
     return nil
@@ -1078,7 +1154,7 @@ local function suggestion(now)
     local target, kind = findWorkTarget(pc, pawn, now)
     if not target then return nil end
     local tools = scanTools(pc, now).best
-    local family = kind == "plot" and plotNeed(target, tools) or KIND_FAMILY[kind]
+    local family = kind == "plot" and plotNeed(target, tools) or familyFor(kind)
     if not family then return nil end
     local tool = tools[family]
     if not tool then return nil end
@@ -1095,7 +1171,7 @@ local function handleToolKey(now)
         return
     end
     local tools = scanTools(pc, now).best
-    local family = kind == "plot" and plotNeed(target, tools) or KIND_FAMILY[kind]
+    local family = kind == "plot" and plotNeed(target, tools) or familyFor(kind)
     if not family then
         debugLog("tool key: this farm plot needs no tool right now")
         return
@@ -1141,7 +1217,7 @@ end
 local function clickTarget(pc, pawn, now, withWeapon)
     local aimed = aimedActor(pawn)
     local kind = aimed and kindOf(aimed)
-    if kind == "plot" or kind == "tree" or kind == "rock" then return aimed, kind end
+    if kind == "plot" or kind == "tree" or kind == "rock" or kind == "vine" then return aimed, kind end
     local me = locationOf(pawn)
     if not me then return nil end
     local reach = cfg.ToolReach * 100
@@ -1150,11 +1226,12 @@ local function clickTarget(pc, pawn, now, withWeapon)
         reach = math.min(AUTO_WEAPON_REACH, reach)
         facing = AUTO_WEAPON_FACING
     end
-    local rock, rockScore = nearestInFront("rock", pc, me, now, reach, facing)
-    local tree, treeScore = nearestInFront("tree", pc, me, now, reach, facing)
-    if rock and (not tree or rockScore <= treeScore) then return rock, "rock" end
-    if tree then return tree, "tree" end
-    return nil
+    local best, bestKind, bestScore = nil, nil, nil
+    for _, kind in ipairs({ "rock", "tree", "vine" }) do
+        local a, score = nearestInFront(kind, pc, me, now, reach, facing)
+        if a and (not bestScore or score < bestScore) then best, bestKind, bestScore = a, kind, score end
+    end
+    return best, bestKind
 end
 
 local function handleAttackClick(now)
@@ -1165,7 +1242,7 @@ local function handleAttackClick(now)
     if not style or (style == "weapon" and not cfg.AutoToolFromWeapon) then return end
     local target, kind = clickTarget(pc, pawn, now, style == "weapon")
     if not target then return end
-    local family = kind == "plot" and plotNeed(target, nil) or KIND_FAMILY[kind]
+    local family = kind == "plot" and plotNeed(target, nil) or familyFor(kind)
     if not family or toolFamilyOf(held) == family then return end
     if pendingSwap and pendingSwap.family == family then
         pendingSwap.deadline = now + SWAP_TIMEOUT
@@ -1334,6 +1411,10 @@ local T = {
     layout = function() return layout end,
     toolbagSlot = toolbagSlot,
     dataAt = function(slot) return itemDataAt(bag(), slot) end,
+    durabilityAt = function(slot)
+        local inv = bag()
+        return durabilityOf(itemAt(inv, slot), itemDataAt(inv, slot))
+    end,
     tools = function() return scanTools(lastPc) end,
     storeTool = storeTool, takeOut = takeOut, storeAll = storeAll,
     takeAllOut = function()
@@ -1350,6 +1431,11 @@ local UI = nil
 do
     local ok, mod = pcall(require, "ui")
     if ok then UI = mod else log("window unavailable: " .. tostring(mod)) end
+end
+local Hotbar = nil
+do
+    local ok, mod = pcall(require, "hotbar")
+    if ok then Hotbar = mod else log("quick row unavailable: " .. tostring(mod)) end
 end
 local Prompt = nil
 do
@@ -1372,6 +1458,7 @@ local function forgetWorld()
     controllers, scannedOnce = {}, false
     forgetTools()
     if Prompt then pcall(Prompt.forget) end
+    if Hotbar then pcall(Hotbar.forget) end
     if UI and UI.forget then pcall(UI.forget) end
 end
 
@@ -1550,6 +1637,10 @@ local function tick()
     if Prompt and ticks % 2 == 0 then
         local ok, err = pcall(Prompt.tick, now)
         if not ok and ticks % 50 == 0 then log("prompt: " .. tostring(err)) end
+    end
+    if Hotbar and ticks % 2 == 1 then
+        local ok, err = pcall(Hotbar.tick, now)
+        if not ok and ticks % 50 == 1 then log("quick row: " .. tostring(err)) end
     end
 end
 

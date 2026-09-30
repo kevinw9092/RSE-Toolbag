@@ -18,11 +18,24 @@ SlotKeys = SHIFT
 # from your toolbag first, then your bag. "none" turns it off. Restart after a change.
 ToolKey = X
 
+# ---- Quick row ----
+# true = show the 10 toolbag slots above the hotbar, with their tools and the SHIFT + number keys.
+QuickRow = true
+# Where the row sits: Above health, Below health, or Above action bar (the 1-8 shortcut bar;
+# only toolbag slots 1-8 show there, to line up with it).
+QuickRowPosition = Above health
+# Move that row up (+) or down (-), in UI units, -300 to 300.
+QuickRowOffset = 0
+
 # true = show "Switch Tool [X]" while you face something your carried tool can work on.
 EquipPrompt = true
 
 # How close a rock or tree must be, in meters (it must also be in front of you). 1.5 to 6.
 ToolReach = 3.0
+
+# Cuttable vines (thorny vines across entrances, vines over wells) need this tool.
+# axe by default; pickaxe, spade, water, compost, rod or net if the game wants another.
+VineTool = axe
 
 # Farm plots: also take out the compost bucket once a plot is watered.
 UseCompost = true

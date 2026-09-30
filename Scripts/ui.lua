@@ -637,6 +637,11 @@ function W.tick(now)
 end
 
 -- Map loads: drop the cached inventory slots (slot art source) unread.
+-- Shared with the quick row (hotbar.lua): icon texture path of an item data path.
+W.iconPathOf = function(dataPath) return iconPathOf(dataPath) end
+-- Also shared: copies the game's slot art onto an Image (kind 'tab': the embroidered item slot frame).
+W.copySlotArt = function(image, kind) return copySlotArt(image, kind) end
+
 function W.forget()
     slotSource, emptySource, slotSearched = nil, nil, -math.huge
     iconCache = {} -- paths only; cleared on map load anyway, belt and braces

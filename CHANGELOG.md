@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.3.0
+- **Toolbag row.** The 10 toolbag slots are shown on the HUD, each with its tool's icon, its number and a durability bar like the action bar's (red when low). A faded SHIFT key cap (your `SlotKeys` modifier) sits at the left, so the keys that take each tool out are always in view. The tool in your hand gets an orange frame. The slots use the game's embroidered item slot frame. It is display only, and hidden while a menu is open or while toolbag storage is off.
+  - `QuickRowPosition`: **Above health**, **Below health**, or **Above action bar**. Above the action bar, only slots 1-8 show, to line up with it. The in-world 1-8 bar is the inventory panel's own quick access bar, which stays on screen when the inventory closes, so the row is placed on that panel's canvas and follows it.
+  - `QuickRowOffset` moves the row up (+) or down (-), -300 to 300.
+  - `QuickRow` turns it off. All three apply at once from RSE-ModMenu.
+- **Cuttable vines.** The tool key, the equip prompt and auto tool now also work on vines and choppable blockers: the thorny vines across entrances, the vines over wells and pools, and the Imaru dragon vines. Also anything else whose class has "Vine" or "Choppable" in its name, but never the Wild Jade Vine enemy or any other creature. They take out the axe; `VineTool` picks another tool if the game wants one.
+- With Debug on, `hud-dump.txt` (in the mod folder) records where the game's health bars and action bar sit, for placing the row.
+- Found while testing: the first build of the row rebuilt itself about 3 times a second. It stacked copies whose newest, still empty copy hid the icons, and it made the game hitch. The row now keeps its widget by path, removes every copy it made before a rebuild, and rebuilds only when its position setting changes, or at most every 10 seconds if its widget is really gone.
+
 ## 2.2.6
 - **The equip prompt looks like the game's own prompts.** It now reads "Switch Tool [X]", drawn like "Harvest [E]" or the inventory's "Sort [V]": a plain label and a boxed key, with no frame. It reuses the game's input legend widget, whose class is taken from one the game already has. The widget's own key icon only draws keys the game has a binding for, so the mod hides it and draws its own key cap in its place. That cap is a 30 by 30 square with the letter centred, matched to the game's key caps. It uses the game's key-cap art when available, and a light outlined box otherwise. Longer key names such as F10 get a wider box.
 - Until a legend widget exists (for example before the inventory is first opened), or if it cannot be used, the prompt falls back to the framed panel from 2.2.5 with the same "Switch Tool [X]" words.
