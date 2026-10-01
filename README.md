@@ -11,7 +11,7 @@ A 10-slot toolbag for your tools. Keep your pickaxe, axe, spade, watering can, c
   - click a toolbag slot to take its tool out
   - **Store all tools** and **Take all out** buttons
 - **Alt+1 to Alt+0** equips toolbag slot 1 to 10. Set `SlotKeys` to change the modifier (Ctrl is dodge and Shift is sprint, so Alt is the default).
-- **Tool key (X).** Face a rock, tree, farm plot, fishing spot, cuttable vine, kebbit burrow or buried treasure and press X. The best tool for the job comes out, from the toolbag first, then your bag.
+- **Tool key (X).** Face a rock or breakable wall, tree, farm plot (the spade digs out dead plants), fishing spot, cuttable vine, kebbit burrow or buried treasure and press X. The best tool for the job comes out, from the toolbag first, then your bag.
 - **Equip prompt.** While you face something a tool you carry can work on, a "Switch Tool [X]" hint appears, drawn like the game's own "Harvest [E]" prompts.
 - **Toolbag row.** The 10 toolbag slots on the HUD, with their tools, numbers and durability, and a faded SHIFT key cap: above the health bars, below them, or above the 1-8 action bar (slots 1-8 there).
 - **Auto tool.** Hit a rock, tree, farm plot, vine, kebbit burrow or buried treasure with the wrong item and the right tool comes out. This is from Expanded Inventory.

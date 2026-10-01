@@ -6,7 +6,7 @@
 -- slot index where it was, so no items move on existing characters. The
 -- toolbag window lives in RSE-Dock's shared window beside the inventory.
 local TAG = "[RSE-Toolbag] "
-local VERSION = "2.3.2"
+local VERSION = "2.3.4"
 local MODMENU_ID = "RSE-Toolbag"
 
 local cfg = {
@@ -978,13 +978,18 @@ local KIND_FAMILY = { rock = "pickaxe", tree = "axe", rod = "rod", net = "net", 
 -- Jade Vine enemy and anything that is a pawn (a creature).
 local VINE_CLASSES = { "BP_ThornyVine_C", "BP_InfectedThornyVine_C", "BP_CleansingPool_Vines_C",
     "BP_DragonImaru_Vines_C", "BP_Choppable_BloodwoodSap_C" }
--- Spade spots: kebbit burrows (agility shortcuts dug open) and buried treasure
--- (buried chests, the journal pages and the coffin of The Great Body Robbery),
--- from the game's asset list (2026-10-01). Any other class with "KebbitBurrow"
--- or "Buried" in its name counts too, except creatures and the burrowing attack.
-local SCAN_CLASS = { rock = "DestructibleWorldActor", tree = "FellableTree", fish = "FishingNodeV2", vine = VINE_CLASSES,
-    dig = { "BP_Agility_Shortcut_KebbitBurrow_C", "BP_BuriedChest_Base_C", "BP_DR_BuriedChest_C",
-        "BP_BuriedJournalItem_C", "BP_TheGreatBodyRobbery_BuriedCoffin_C" } }
+-- Spade spots: kebbit burrows (agility shortcuts dug open) and everything the game
+-- makes diggable (DiggableInteractable: buried chests of every kind, buried journal
+-- pages, quest dig spots), plus the coffin of The Great Body Robbery, from the
+-- game's asset list and its native classes (2026-10-01). Any other class with
+-- "KebbitBurrow" or "Buried" in its name counts too, except creatures and the
+-- burrowing attack. Dug-up spots stop counting (see isDigSpot).
+-- Rocks: the game's destructible actors whose class names a rock or ore (see
+-- isRockClass), plus the breakable walls by name (castle, DK, DR, vault and
+-- Fuzan walls, from the asset list, 2026-10-01) in case one is not destructible.
+local SCAN_CLASS = { rock = { "DestructibleWorldActor", "BP_Breakable_Castle_Wall_C", "BP_Breakable_DK_Wall_C",
+        "BP_Breakable_DR_Wall_C", "BP_Breakable_Vault_Wall_C", "BP_DestructibleWall_Fuzan_C" }, tree = "FellableTree", fish = "FishingNodeV2", vine = VINE_CLASSES,
+    dig = { "BP_Agility_Shortcut_KebbitBurrow_C", "DiggableInteractable", "BP_TheGreatBodyRobbery_BuriedCoffin_C" } }
 -- Kinds looked for in front of you, nearest wins (fishing spots only if none is near).
 local WORK_KINDS = { "rock", "tree", "vine", "dig" }
 local DETECTOR_CLASS = "/Script/Dominion.InteractableDetectorComponent"
@@ -1042,8 +1047,10 @@ local function locationOf(actor)
     return nil
 end
 
+-- Rocks, ore and breakable walls: all mined with the pickaxe.
 local function isRockClass(name)
-    return name:find("Rock", 1, true) ~= nil or name:find("OreNode", 1, true) ~= nil
+    if name:find("Rock", 1, true) or name:find("OreNode", 1, true) then return true end
+    return name:find("Wall", 1, true) ~= nil and (name:find("Breakable", 1, true) or name:find("Destructible", 1, true)) ~= nil
 end
 
 local function isDepleted(actor)
@@ -1058,14 +1065,23 @@ local function isVineClass(cls)
     return cls:find("Vine", 1, true) ~= nil or cls:find("Choppable", 1, true) ~= nil
 end
 
-local function isDigClass(cls)
-    if cls:find("AI_", 1, true) or cls:find("Contact_", 1, true) or cls:find("DamageInfliction", 1, true) then return false end
-    return cls:find("KebbitBurrow", 1, true) ~= nil or cls:find("Buried", 1, true) ~= nil
-end
-
 local function isPawn(actor)
     local ok, v = pcall(function() return actor:IsA("/Script/Engine.Pawn") end)
     return ok and v == true
+end
+
+-- A spade spot (first result), and whether it still needs digging (second): a spot
+-- whose dig charges are all applied (DigChargesApplied >= DigChargesRequired) is
+-- dug up. When the charges cannot be read it counts as not dug yet.
+local function isDigSpot(actor, cls)
+    if cls:find("AI_", 1, true) or cls:find("Contact_", 1, true) or cls:find("DamageInfliction", 1, true) then return false end
+    local spot = cls:find("KebbitBurrow", 1, true) or cls:find("Buried", 1, true)
+        or select(2, pcall(function() return actor:IsA("/Script/Dominion.DiggableInteractable") end)) == true
+    if not spot or isPawn(actor) then return false end
+    local okA, applied = pcall(function() return actor.DigChargesApplied end)
+    local okR, required = pcall(function() return actor.DigChargesRequired end)
+    applied, required = okA and tonumber(applied), okR and tonumber(required)
+    return true, not (applied and required and required > 0 and applied >= required)
 end
 
 -- The tool for vines: VineTool (config), one of the tool families; axe by default.
@@ -1083,7 +1099,8 @@ local function kindOf(actor)
         if not vineLogged then vineLogged = true debugLog("vine target: " .. cls .. " -> " .. vineFamily()) end
         return "vine"
     end
-    if isDigClass(cls) and not isPawn(actor) then return "dig" end
+    local spot, undug = isDigSpot(actor, cls)
+    if spot then return undug and "dig" or nil end
     if cls:find("FishingNode", 1, true) then return cls:find("_Net_", 1, true) and "net" or "rod" end
     if cls:find("Tree", 1, true) then return "tree" end
     if isRockClass(cls) then return "rock" end
@@ -1113,6 +1130,7 @@ local function candidates(kind, me, now)
     toolLists[kind] = list
     local classes = SCAN_CLASS[kind]
     if type(classes) ~= "table" then classes = { classes } end
+    local seen = {}          -- an actor found through a base class and its own class is listed once
     for _, className in ipairs(classes) do
         local ok, all = pcall(FindAllOf, className)
         if ok and type(all) == "table" then
@@ -1121,7 +1139,8 @@ local function candidates(kind, me, now)
                     and ((kind ~= "vine" and kind ~= "dig") or not isPawn(a)) then
                     local l = locationOf(a)
                     local path = l and math.sqrt((l.X - me.X) ^ 2 + (l.Y - me.Y) ^ 2) < SCAN_RADIUS and objectPathOf(a) or ""
-                    if path ~= "" then
+                    if path ~= "" and not seen[path] then
+                        seen[path] = true
                         list.items[#list.items + 1] = { path = path, x = l.X, y = l.Y }
                     end
                 end
@@ -1152,7 +1171,10 @@ local function nearestInFront(kind, pc, me, now, reach, facingMin)
     table.sort(ranked, function(a, b) return a.score < b.score end)
     for _, r in ipairs(ranked) do
         local actor = lookUpPath(r.path)
-        if actor and not (kind == "tree" and isDepleted(actor)) then return actor, r.score end
+        if actor and not (kind == "tree" and isDepleted(actor))
+            and not (kind == "dig" and not select(2, isDigSpot(actor, classNameOf(actor)))) then
+            return actor, r.score
+        end
     end
     return nil
 end
@@ -1175,10 +1197,38 @@ local function findWorkTarget(pc, pawn, now)
 end
 
 -- What a farm plot needs next; `have` limits it to tools the player carries.
+-- The plot's stage (EFarmPlotStage: Idle, Planted, Weeds, Diseased, Dead or
+-- Harvestable), or nil if it cannot be read. The stage names are read from the
+-- game's enum once.
+local plotStage
+do
+    local names, warned = nil, false
+    plotStage = function(slot)
+        if not names then
+            local found = {}
+            pcall(function()
+                StaticFindObject("/Script/Dominion.EFarmPlotStage"):ForEachName(function(n, v)
+                    found[v] = n:ToString():match("([%w_]+)$")
+                end)
+            end)
+            if next(found) then names = found end
+        end
+        local ok, v = pcall(function() return slot.PlotStage end)
+        local stage = ok and names and names[tonumber(v) or -1] or nil
+        if not stage and not warned then
+            warned = true
+            debugLog("farm plot: stage not readable (PlotStage " .. tostring(ok and v) .. "); dead plants are not detected")
+        end
+        return stage
+    end
+end
+
 local function plotNeed(actor, have)
     local slot = componentOf(actor, FARM_SLOT_CLASS)
     if not slot then return nil end
     if callOn(slot, "GetSoilState") == 0 then return "spade" end
+    -- A dead plant is dug out with the spade.
+    if plotStage(slot) == "Dead" then return "spade" end
     if callOn(slot, "CanHarvest") == true or callOn(slot, "CanHealDisease") == true then return nil end
     if callOn(slot, "IsFullyWatered") == false and (not have or have.water) then return "water" end
     if cfg.UseCompost and callOn(slot, "IsFullyFertilized") == false and (not have or have.compost) then return "compost" end

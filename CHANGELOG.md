@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.3.4
+- **Breakable walls.** The tool key, the Switch Tool prompt and auto tool take out the pickaxe for the breakable walls (castle, DK, DR and vault walls, and the Fuzan wall), as they do for rocks.
+
+## 2.3.3
+- **Dead plants.** Facing a farm plot whose plant has died, the tool key, the Switch Tool prompt and auto tool take out the spade to dig it out. The plot's stage is read from the game (`PlotStage`); with Debug on, the log says so if it cannot be read.
+- **Every diggable spot.** Buried treasure is now found through the game's own diggable class, which covers every kind of buried chest, buried journal pages and quest dig spots, not only the blueprints listed in 2.3.2.
+- **Dug-up spots no longer ask for the spade.** A spot whose digging is complete stops counting.
+
 ## 2.3.2
 - **Kebbit burrows and buried treasure.** The tool key, the Switch Tool prompt and auto tool now take out the spade for kebbit burrows and buried treasure: buried chests, buried journal pages and the buried coffin.
 - **Toolbag keys default to Alt+1-0.** Ctrl is dodge and Shift is sprint. Existing configs keep their setting.
