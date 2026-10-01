@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.3.7
+- *Store all* no longer checks RSE-QualityOfLife's locked slots: favourite slots were removed from RSE-QualityOfLife 0.2.0.
+
 ## 2.3.6
 Checked against the game's header dump (CL-240163), so names that were guessed are now the game's own.
 - **Server handshake fixed.** A joining player's "I'm waiting" message was sent with ServerExec, but the server receives it as ServerExecRPC. The old hook never fired, and the server's own 5 s check of players covered for it. Both are now hooked, so the server answers at once.

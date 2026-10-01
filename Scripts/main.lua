@@ -6,7 +6,7 @@
 -- slot index where it was, so no items move on existing characters. The
 -- toolbag window lives in RSE-Dock's shared window beside the inventory.
 local TAG = "[RSE-Toolbag] "
-local VERSION = "2.3.6"
+local VERSION = "2.3.7"
 local MODMENU_ID = "RSE-Toolbag"
 
 local cfg = {
@@ -963,15 +963,11 @@ local function takeOut(slot)
     queueMove(slot, to, displayName(data))
 end
 
--- Slots locked in RSE-QualityOfLife (its favourite slots, shared as ",3,17,")
--- are left alone.
 local function storeAll()
     forgetTools()
-    local okL, locked = pcall(function() return ModRef:GetSharedVariable("RSEQoL.locked") end)
-    locked = okL and type(locked) == "string" and locked or ""
     local t = scanTools(lastPc)
     for _, e in ipairs(t.all) do
-        if not e.toolbag and not locked:find("," .. e.slot .. ",", 1, true) then storeTool(e.slot) end
+        if not e.toolbag then storeTool(e.slot) end
     end
 end
 
