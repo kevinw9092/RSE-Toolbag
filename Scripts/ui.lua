@@ -447,6 +447,7 @@ local function build(host, panel)
     local keys = newText(tree, 11, COLOR.dim)
     setText(keys, string.format(STR.keys, tostring(T.cfg.SlotKeys):upper()))
     pad(add(root, keys), 2, ROW_GAP, 2, ROW_GAP)
+    view.keys, view.keysFor = keys, T.cfg.SlotKeys
 
     local grid = widget('UniformGridPanel', tree)
     pcall(function() grid:SetSlotPadding({ Left = CELL_PAD, Top = CELL_PAD, Right = CELL_PAD, Bottom = CELL_PAD }) end)
@@ -556,7 +557,7 @@ local function hover(view)
 end
 
 -- ------------------------------------------------------------------- tick
-local registered, iconItem = false, nil
+local registered, iconItem, iconKeys = false, nil, nil
 local lastRefresh = 0
 
 -- A pickaxe's item data for the icon when you carry no tool yet (or storage is
@@ -591,11 +592,13 @@ local function register(now)
         if best[f] and best[f].path ~= '' then item = best[f].path break end
     end
     if not item and Dock.inventoryOpen() then item = anyPickaxe() end
-    if registered and (item == nil or item == iconItem) then return end
+    local keys = tostring(T.cfg.SlotKeys) .. '|' .. tostring(T.cfg.ToolKey)
+    if item == nil then item = iconItem end
+    if registered and item == iconItem and keys == iconKeys then return end
     Dock.register(DOCK_ID, { order = 20, label = 'Toolbag', item = item, window = 'host',
         desc = 'Keep your tools out of your bag. ' .. tostring(T.cfg.SlotKeys):upper()
             .. ' + 1-0 equips a toolbag slot; ' .. tostring(T.cfg.ToolKey):upper() .. ' equips the right tool for what you face.' })
-    registered, iconItem = true, item
+    registered, iconItem, iconKeys = true, item, keys
 end
 
 local warnedNoDock = false
@@ -632,6 +635,11 @@ function W.tick(now)
         view.root:SetVisibility(open and SELF_HIT_TEST_INVISIBLE or COLLAPSED)
         if open then
             lastRefresh, view.recenterTicks = 0, 3
+            -- SlotKeys can change in RSE-ModMenu while the game runs.
+            if view.keysFor ~= T.cfg.SlotKeys then
+                view.keysFor = T.cfg.SlotKeys
+                pcall(setText, view.keys, string.format(STR.keys, tostring(T.cfg.SlotKeys):upper()))
+            end
             -- Cells built before any inventory slot existed get the slot art now.
             for _, c in ipairs(view.cells) do slotArt(c) end
         end

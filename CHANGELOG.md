@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.3.2
+- **Kebbit burrows and buried treasure.** The tool key, the Switch Tool prompt and auto tool now take out the spade for kebbit burrows and buried treasure: buried chests, buried journal pages and the buried coffin.
+- **Toolbag keys default to Alt+1-0.** Ctrl is dodge and Shift is sprint. Existing configs keep their setting.
+- **Fixed: changing `SlotKeys` in RSE-ModMenu did nothing until a restart.** The keys were bound once, for the modifier set at start. Now 1-0 is bound with Alt, Shift and Ctrl, and the setting picks which one works, so a change applies at once. The toolbag row's key cap, the window's hint and the dock tooltip follow it.
+
 ## 2.3.1
 - **Toolbag row:** the tool in your hand now gets a thin bronze outline inside its slot, like the action bar's selected slot, instead of an orange frame.
 - **Fewer hitches while moving.** The tool key, the equip prompt and auto tool keep a list of nearby rocks, trees, vines and fishing spots. It is now rebuilt when you have moved far enough that something within reach could be missing from it (about 24 m, 10 m for fishing), or after 45 s, and only one kind per tick. It was every 8 m or 20 s, all kinds at once.

@@ -6,11 +6,11 @@
 -- slot index where it was, so no items move on existing characters. The
 -- toolbag window lives in RSE-Dock's shared window beside the inventory.
 local TAG = "[RSE-Toolbag] "
-local VERSION = "2.3.1"
+local VERSION = "2.3.2"
 local MODMENU_ID = "RSE-Toolbag"
 
 local cfg = {
-    SlotKeys = "SHIFT",          -- modifier for 1-0 that equips toolbag slots: SHIFT, CTRL, ALT or NONE
+    SlotKeys = "ALT",            -- modifier for 1-0 that equips toolbag slots: ALT, SHIFT, CTRL or NONE
     ToolKey = "X",               -- equip the right tool for what you face; "none" turns it off
     EquipPrompt = true,          -- "Switch Tool [X]" hint near a rock, tree, farm plot or fishing spot
     AutoTool = true,
@@ -25,7 +25,7 @@ local cfg = {
     QuickRowOffset = 0,          -- move that row up (+) or down (-), in UI units, -300 to 300
     Debug = false,
 }
-local LIVE_KEYS = { "QuickRow", "QuickRowPosition", "QuickRowOffset", "EquipPrompt", "AutoTool", "AutoToolFromWeapon", "ToolReach", "UseCompost", "VineTool", "BagFirst", "Debug" }
+local LIVE_KEYS = { "SlotKeys", "QuickRow", "QuickRowPosition", "QuickRowOffset", "EquipPrompt", "AutoTool", "AutoToolFromWeapon", "ToolReach", "UseCompost", "VineTool", "BagFirst", "Debug" }
 
 local PLAYER_CONTROLLER = "/Game/Gameplay/Character/Player/BP_PlayerController.BP_PlayerController_C"
 local INVENTORY_TEMPLATE = PLAYER_CONTROLLER .. ":BP_Components_Inventory_GEN_VARIABLE"
@@ -971,14 +971,22 @@ local function equipFamily(pc, family, tools, now)
 end
 
 -- ----------------------------------------------------------- work targets
-local KIND_FAMILY = { rock = "pickaxe", tree = "axe", rod = "rod", net = "net" }
+local KIND_FAMILY = { rock = "pickaxe", tree = "axe", rod = "rod", net = "net", dig = "spade" }
 -- Cuttable vines and other choppable blockers (the thorny vines across entrances, the
 -- vines over wells and pools): their blueprints, from the game's asset list (2026-09-30).
 -- Any other class with "Vine" or "Choppable" in its name counts too, except the Wild
 -- Jade Vine enemy and anything that is a pawn (a creature).
 local VINE_CLASSES = { "BP_ThornyVine_C", "BP_InfectedThornyVine_C", "BP_CleansingPool_Vines_C",
     "BP_DragonImaru_Vines_C", "BP_Choppable_BloodwoodSap_C" }
-local SCAN_CLASS = { rock = "DestructibleWorldActor", tree = "FellableTree", fish = "FishingNodeV2", vine = VINE_CLASSES }
+-- Spade spots: kebbit burrows (agility shortcuts dug open) and buried treasure
+-- (buried chests, the journal pages and the coffin of The Great Body Robbery),
+-- from the game's asset list (2026-10-01). Any other class with "KebbitBurrow"
+-- or "Buried" in its name counts too, except creatures and the burrowing attack.
+local SCAN_CLASS = { rock = "DestructibleWorldActor", tree = "FellableTree", fish = "FishingNodeV2", vine = VINE_CLASSES,
+    dig = { "BP_Agility_Shortcut_KebbitBurrow_C", "BP_BuriedChest_Base_C", "BP_DR_BuriedChest_C",
+        "BP_BuriedJournalItem_C", "BP_TheGreatBodyRobbery_BuriedCoffin_C" } }
+-- Kinds looked for in front of you, nearest wins (fishing spots only if none is near).
+local WORK_KINDS = { "rock", "tree", "vine", "dig" }
 local DETECTOR_CLASS = "/Script/Dominion.InteractableDetectorComponent"
 local FARM_SLOT_CLASS = "/Script/Dominion.FarmSlotComponent"
 local RESPAWN_CLASS = "/Script/Dominion.ResourceRespawnComponent"
@@ -1050,6 +1058,11 @@ local function isVineClass(cls)
     return cls:find("Vine", 1, true) ~= nil or cls:find("Choppable", 1, true) ~= nil
 end
 
+local function isDigClass(cls)
+    if cls:find("AI_", 1, true) or cls:find("Contact_", 1, true) or cls:find("DamageInfliction", 1, true) then return false end
+    return cls:find("KebbitBurrow", 1, true) ~= nil or cls:find("Buried", 1, true) ~= nil
+end
+
 local function isPawn(actor)
     local ok, v = pcall(function() return actor:IsA("/Script/Engine.Pawn") end)
     return ok and v == true
@@ -1070,6 +1083,7 @@ local function kindOf(actor)
         if not vineLogged then vineLogged = true debugLog("vine target: " .. cls .. " -> " .. vineFamily()) end
         return "vine"
     end
+    if isDigClass(cls) and not isPawn(actor) then return "dig" end
     if cls:find("FishingNode", 1, true) then return cls:find("_Net_", 1, true) and "net" or "rod" end
     if cls:find("Tree", 1, true) then return "tree" end
     if isRockClass(cls) then return "rock" end
@@ -1104,7 +1118,7 @@ local function candidates(kind, me, now)
         if ok and type(all) == "table" then
             for _, a in pairs(all) do
                 if isValidObj(a) and not nameOf(a):find("^Default__") and (kind ~= "rock" or isRockClass(classNameOf(a)))
-                    and (kind ~= "vine" or not isPawn(a)) then
+                    and ((kind ~= "vine" and kind ~= "dig") or not isPawn(a)) then
                     local l = locationOf(a)
                     local path = l and math.sqrt((l.X - me.X) ^ 2 + (l.Y - me.Y) ^ 2) < SCAN_RADIUS and objectPathOf(a) or ""
                     if path ~= "" then
@@ -1150,7 +1164,7 @@ local function findWorkTarget(pc, pawn, now)
     local me = locationOf(pawn)
     if not me then return nil end
     local best, bestKind, bestScore = nil, nil, nil
-    for _, kind in ipairs({ "rock", "tree", "vine" }) do
+    for _, kind in ipairs(WORK_KINDS) do
         local a, score = nearestInFront(kind, pc, me, now)
         if a and (not bestScore or score < bestScore) then best, bestKind, bestScore = a, kind, score end
     end
@@ -1206,7 +1220,7 @@ local function handleToolKey(now)
     if not pc or menuOpen(pc) then return end
     local target, kind = findWorkTarget(pc, pawn, now)
     if not target then
-        debugLog("tool key: no rock, tree, farm plot or fishing spot in front of you")
+        debugLog("tool key: no rock, tree, vine, farm plot, burrow, buried treasure or fishing spot in front of you")
         return
     end
     local tools = scanTools(pc, now).best
@@ -1256,7 +1270,7 @@ end
 local function clickTarget(pc, pawn, now, withWeapon)
     local aimed = aimedActor(pawn)
     local kind = aimed and kindOf(aimed)
-    if kind == "plot" or kind == "tree" or kind == "rock" or kind == "vine" then return aimed, kind end
+    if kind and kind ~= "rod" and kind ~= "net" then return aimed, kind end
     local me = locationOf(pawn)
     if not me then return nil end
     local reach = cfg.ToolReach * 100
@@ -1266,7 +1280,7 @@ local function clickTarget(pc, pawn, now, withWeapon)
         facing = AUTO_WEAPON_FACING
     end
     local best, bestKind, bestScore = nil, nil, nil
-    for _, kind in ipairs({ "rock", "tree", "vine" }) do
+    for _, kind in ipairs(WORK_KINDS) do
         local a, score = nearestInFront(kind, pc, me, now, reach, facing)
         if a and (not bestScore or score < bestScore) then best, bestKind, bestScore = a, kind, score end
     end
@@ -1384,6 +1398,13 @@ end
 -- ------------------------------------------------------------------ keys
 local requests = {}      -- keys are bound off the game thread; work runs in the game-thread tick
 
+-- The modifier key SlotKeys names (UE4SS's name for it), or nil for NONE.
+local slotModifier
+do
+    local names = { ALT = "ALT", SHIFT = "SHIFT", CTRL = "CONTROL", CONTROL = "CONTROL" }
+    slotModifier = function() return names[tostring(cfg.SlotKeys or "none"):upper()] end
+end
+
 local function bindKeys()
     local name = tostring(cfg.ToolKey or "none")
     if name ~= "" and name:lower() ~= "none" then
@@ -1394,20 +1415,26 @@ local function bindKeys()
             log("tool key '" .. name .. "' is not a UE4SS key name; tool key off")
         end
     end
-    local mod = tostring(cfg.SlotKeys or "none"):upper()
-    local modifiers = { SHIFT = "SHIFT", CTRL = "CONTROL", CONTROL = "CONTROL", ALT = "ALT" }
-    local modKey = modifiers[mod] and ModifierKey and ModifierKey[modifiers[mod]]
-    if not modKey then
-        if mod ~= "NONE" then log("SlotKeys '" .. mod .. "' is not SHIFT, CTRL, ALT or NONE; slot keys off") end
-        return
+    -- 1-0 with each modifier is bound once; SlotKeys picks which one acts, so a
+    -- change in RSE-ModMenu applies at once (a key bind cannot be removed, and
+    -- binding only the configured modifier needed a restart after a change).
+    local mod = slotModifier()
+    if not mod and tostring(cfg.SlotKeys or "none"):upper() ~= "NONE" then
+        log("SlotKeys '" .. tostring(cfg.SlotKeys) .. "' is not ALT, SHIFT, CTRL or NONE; slot keys off")
     end
+    if not ModifierKey then return end
     local digits = { "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE", "ZERO" }
     local bound = 0
-    for k, d in ipairs(digits) do
-        local key = Key and Key[d]
-        if key and pcall(RegisterKeyBind, key, { modKey }, function() requests.slot = k end) then bound = bound + 1 end
+    for _, m in ipairs({ "ALT", "SHIFT", "CONTROL" }) do
+        local modKey = ModifierKey[m]
+        for k, d in ipairs(digits) do
+            local key = Key and Key[d]
+            if modKey and key and pcall(RegisterKeyBind, key, { modKey }, function()
+                if slotModifier() == m then requests.slot = k end
+            end) then bound = bound + 1 end
+        end
     end
-    debugLog(string.format("toolbag keys: %s+1..0 (%d bound)", mod, bound))
+    debugLog(string.format("toolbag keys: %s+1..0 (%d binds for ALT, SHIFT and CTRL)", mod or "off", bound))
 end
 
 local function keyTick(now)

@@ -10,11 +10,11 @@ A 10-slot toolbag for your tools. Keep your pickaxe, axe, spade, watering can, c
   - the tools in your bag and hotbar: click one to store it
   - click a toolbag slot to take its tool out
   - **Store all tools** and **Take all out** buttons
-- **Shift+1 to Shift+0** equips toolbag slot 1 to 10. Set `SlotKeys` to change the modifier.
-- **Tool key (X).** Face a rock, tree, farm plot, fishing spot or cuttable vine and press X. The best tool for the job comes out, from the toolbag first, then your bag.
+- **Alt+1 to Alt+0** equips toolbag slot 1 to 10. Set `SlotKeys` to change the modifier (Ctrl is dodge and Shift is sprint, so Alt is the default).
+- **Tool key (X).** Face a rock, tree, farm plot, fishing spot, cuttable vine, kebbit burrow or buried treasure and press X. The best tool for the job comes out, from the toolbag first, then your bag.
 - **Equip prompt.** While you face something a tool you carry can work on, a "Switch Tool [X]" hint appears, drawn like the game's own "Harvest [E]" prompts.
 - **Toolbag row.** The 10 toolbag slots on the HUD, with their tools, numbers and durability, and a faded SHIFT key cap: above the health bars, below them, or above the 1-8 action bar (slots 1-8 there).
-- **Auto tool.** Hit a rock, tree, farm plot or vine with the wrong item and the right tool comes out. This is from Expanded Inventory.
+- **Auto tool.** Hit a rock, tree, farm plot, vine, kebbit burrow or buried treasure with the wrong item and the right tool comes out. This is from Expanded Inventory.
 
 ## Requirements
 - UE4SS for RuneScape: Dragonwilds (a recent experimental build)
@@ -39,7 +39,7 @@ Rules:
 | Setting | Default | Meaning |
 |---|---|---|
 | `ToolbagMode` | `off` | toolbag storage: `off`, `private` or `items` (see above). Restart after a change |
-| `SlotKeys` | `SHIFT` | modifier for 1-0: `SHIFT`, `CTRL`, `ALT` or `NONE`. Restart after a change |
+| `SlotKeys` | `ALT` | modifier for 1-0: `ALT`, `SHIFT`, `CTRL` or `NONE`. Applies at once from RSE-ModMenu |
 | `ToolKey` | `X` | tool key, `none` turns it off. Restart after a change |
 | `EquipPrompt` | `true` | show the equip hint |
 | `ToolReach` | `3.0` | how close a rock or tree must be, in meters (1.5 to 6) |

@@ -441,7 +441,7 @@ local function build(root, pc)
         assert(valid(tree) and pcall(function() host.WidgetTree = tree end), 'no widget tree for the quick row')
     end
     local row = umg('HorizontalBox', tree)
-    local mod = tostring(T.cfg.SlotKeys or 'SHIFT'):upper()
+    local mod = tostring(T.cfg.SlotKeys or 'ALT'):upper()
     local cs = row:AddChildToHorizontalBox(keyCap(tree, mod == 'CONTROL' and 'CTRL' or mod))
     pcall(function() cs:SetVerticalAlignment(2) cs:SetPadding({ Left = 0, Top = 0, Right = 4, Bottom = 0 }) end)
     local art = root and slotArtFrom(root)
@@ -458,7 +458,7 @@ local function build(root, pc)
     if T.cfg.Debug and not dumped then dumped = true pcall(dumpHud) end
     local hostPath = pathOf(host)
     if hostPath then madeHosts[#madeHosts + 1] = hostPath end
-    return { host = host, hostPath = hostPath, cells = cells, shown = nil, pos = pos, offset = offset() }
+    return { host = host, hostPath = hostPath, cells = cells, shown = nil, pos = pos, offset = offset(), mod = T.cfg.SlotKeys }
 end
 
 local function setShown(on)
@@ -536,7 +536,7 @@ function H.tick(now)
     if not T.isValid(pc) then setShown(false) return end
     -- Rebuild when the position setting changed (at once), or when the row's
     -- widget is really gone: looked up by path every 2 s, rebuilt at most every 10 s.
-    if view and (view.pos ~= position() or view.offset ~= offset()) then
+    if view and (view.pos ~= position() or view.offset ~= offset() or view.mod ~= T.cfg.SlotKeys) then
         H.forget()
     elseif view and now >= (view.nextCheck or 0) then
         view.nextCheck = now + 2

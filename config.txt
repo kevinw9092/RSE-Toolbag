@@ -10,11 +10,12 @@
 ToolbagMode = off
 
 # ---- Toolbag keys ----
-# Modifier for 1-0 that equips toolbag slots 1-10: SHIFT, CTRL, ALT or NONE (off). Restart after a change.
-SlotKeys = SHIFT
+# Modifier for 1-0 that equips toolbag slots 1-10: ALT (default; CTRL is dodge and SHIFT is sprint),
+# SHIFT, CTRL or NONE (off).
+SlotKeys = ALT
 
 # ---- Tool key ----
-# Face a rock, tree, farm plot or fishing spot and press this key: the best tool for it comes out,
+# Face a rock, tree, vine, farm plot, kebbit burrow, buried treasure or fishing spot and press this key: the best tool for it comes out,
 # from your toolbag first, then your bag. "none" turns it off. Restart after a change.
 ToolKey = X
 
