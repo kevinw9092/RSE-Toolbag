@@ -164,7 +164,10 @@ local function buildLegend(pc, cls)
     -- Hide the game's key icon (the whole part of the row that holds it).
     local iconPart = valid(icon) and (childOf(row, icon) or icon) or nil
     if iconPart then pcall(function() iconPart:SetVisibility(COLLAPSED) end) end
-    local cap, keyText, copied = keyCap(w.WidgetTree, valid(icon) and findNamed(icon, 'IconBorder', 0))
+    -- IconBorder is a field of the game's input icon widget (UDomInputIconWidget); the search is the fallback.
+    local border = valid(icon) and get(function() return icon.IconBorder end)
+    if not valid(border) then border = valid(icon) and findNamed(icon, 'IconBorder', 0) end
+    local cap, keyText, copied = keyCap(w.WidgetTree, border)
     local slot = row:AddChildToHorizontalBox(cap)
     pcall(function() slot:SetVerticalAlignment(2) end)
     pcall(function() slot:SetPadding({ Left = 8, Top = 0, Right = 0, Bottom = 0 }) end)
@@ -278,11 +281,12 @@ local function build(pc)
     end
     if not where then
         pcall(function() box:RemoveFromParent() end)
-        where = pcall(function() frame.PanelContent:AddChild(box) end) and 'panel content' or nil
+        -- PanelContent is a NamedSlot (one child): SetContent, as the game's header dump shows.
+        where = pcall(function() frame.PanelContent:SetContent(box) end) and 'panel content' or nil
     end
     if not where then
         pcall(function() text:RemoveFromParent() end)
-        frame.PanelContent:AddChild(text)
+        frame.PanelContent:SetContent(text)
         where = 'panel content, uncentred'
     end
     T.debugLog('equip prompt text placed in the ' .. where .. ' (panel root: ' .. rootClass .. ')')

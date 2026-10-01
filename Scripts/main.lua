@@ -6,7 +6,7 @@
 -- slot index where it was, so no items move on existing characters. The
 -- toolbag window lives in RSE-Dock's shared window beside the inventory.
 local TAG = "[RSE-Toolbag] "
-local VERSION = "2.3.5"
+local VERSION = "2.3.6"
 local MODMENU_ID = "RSE-Toolbag"
 
 local cfg = {
@@ -416,10 +416,18 @@ local function growSlots(inv, total, label)
     local n = slotCount(inv)
     if type(n) ~= "number" then return false end
     if n >= total then return true end
+    -- Normally the slots are already there: the inventory is built from the
+    -- template growForToolbag extended. SetMaxSlotCount is not a reflected
+    -- function in the game's header dump (2026-10-01); it is still tried in case
+    -- a build exposes it, and otherwise the MaxSlotCount field is raised.
     local fn = findFunction(inv, "SetMaxSlotCount")
     local ps = fn and inputParams(fn) or {}
     if not (fn and #ps >= 1 and NUMERIC[ps[1].kind]) then
-        log(label .. ": SetMaxSlotCount was not found; toolbag off")
+        pcall(function() inv:SetPropertyValue("MaxSlotCount", total) end)
+        local after = slotCount(inv) or 0
+        debugLog(string.format("%s: inventory had %d < %d slots; MaxSlotCount raised, now %d", label, n, total, after))
+        if after >= total then return true end
+        log(label .. ": the inventory has " .. n .. " slots and could not be grown to " .. total .. "; toolbag off")
         return false
     end
     local ok, err = pcall(function()
@@ -671,6 +679,21 @@ end
 local durabilityLogged = false
 local function durabilityOf(item, data)
     if not item or not isValidObj(data) then return nil end
+    -- The item's own functions (UItem in the game's header dump): IsUnbreakable,
+    -- GetDurability and GetMaxDurability (per item, so upgrades count).
+    local okU, unbreakable = pcall(function() return item:IsUnbreakable() end)
+    if okU and unbreakable == true then return nil end
+    local okC, cur = pcall(function() return item:GetDurability() end)
+    local okM, max = pcall(function() return item:GetMaxDurability() end)
+    cur, max = okC and tonumber(cur), okM and tonumber(max)
+    if cur and max and max > 0 then
+        if not durabilityLogged then
+            durabilityLogged = true
+            debugLog(string.format("durability read from item:GetDurability / GetMaxDurability (%s: %d / %d)", nameOf(data), cur, max))
+        end
+        return math.max(0, math.min(1, cur / max))
+    end
+    -- Older route (names guessed before the dump), kept as the fallback.
     local okH, has = pcall(function() return data.bHasDurability end)
     if okH and has == false then return nil end
     local cur, curFrom = nil, nil
@@ -701,7 +724,7 @@ local function durabilityOf(item, data)
 end
 
 local function stackOf(item)
-    for _, field in ipairs({ "Quantity", "Count", "StackSize", "Amount" }) do
+    for _, field in ipairs({ "Count", "Quantity", "StackSize", "Amount" }) do
         local ok, v = pcall(function() return item[field] end)
         if ok and type(v) == "number" and v >= 1 then return math.floor(v) end
     end
@@ -989,9 +1012,9 @@ local VINE_CLASSES = { "BP_ThornyVine_C", "BP_InfectedThornyVine_C", "BP_Cleansi
 -- "KebbitBurrow" or "Buried" in its name counts too, except creatures and the
 -- burrowing attack. Dug-up spots stop counting (see isDigSpot).
 -- Rocks: the game's destructible actors whose class names a rock or ore (see
--- isRockClass), plus the breakable walls by name (castle, DK, DR, vault and
+-- isRockClass), ore nodes (AOreNode is its own class), plus the breakable walls by name (castle, DK, DR, vault and
 -- Fuzan walls, from the asset list, 2026-10-01) in case one is not destructible.
-local SCAN_CLASS = { rock = { "DestructibleWorldActor", "BP_Breakable_Castle_Wall_C", "BP_Breakable_DK_Wall_C",
+local SCAN_CLASS = { rock = { "DestructibleWorldActor", "OreNode", "BP_Breakable_Castle_Wall_C", "BP_Breakable_DK_Wall_C",
         "BP_Breakable_DR_Wall_C", "BP_Breakable_Vault_Wall_C", "BP_DestructibleWall_Fuzan_C" }, tree = "FellableTree", fish = "FishingNodeV2", vine = VINE_CLASSES,
     dig = { "BP_Agility_Shortcut_KebbitBurrow_C", "DiggableInteractable", "BP_TheGreatBodyRobbery_BuriedCoffin_C" } }
 -- Kinds looked for in front of you, nearest wins (fishing spots only if none is near).
@@ -1082,6 +1105,9 @@ local function isDigSpot(actor, cls)
     local spot = cls:find("KebbitBurrow", 1, true) or cls:find("Buried", 1, true)
         or select(2, pcall(function() return actor:IsA("/Script/Dominion.DiggableInteractable") end)) == true
     if not spot or isPawn(actor) then return false end
+    -- Kebbit burrows (AKebbitBurrow, not a DiggableInteractable): dug open once found.
+    local okF, found = pcall(function() return actor:IsKebbitBurrowFound(lastPc) end)
+    if okF and type(found) == "boolean" then return true, not found end
     local okA, applied = pcall(function() return actor.DigChargesApplied end)
     local okR, required = pcall(function() return actor.DigChargesRequired end)
     applied, required = okA and tonumber(applied), okR and tonumber(required)
@@ -1112,7 +1138,8 @@ local function kindOf(actor)
 end
 
 local function aimedActor(pawn)
-    local det = componentOf(pawn, DETECTOR_CLASS)
+    local okD, det = pcall(function() return pawn.InteractableDetector end)
+    if not (okD and isValidObj(det)) then det = componentOf(pawn, DETECTOR_CLASS) end
     if not det then return nil end
     local ok, a = pcall(function() return det.CurrentWorldActor end)
     if ok and isValidObj(a) then return a end
@@ -1319,12 +1346,20 @@ local leftMouseKey = nil
 local pendingSwap = nil
 local lastClickAt = -100
 
-local function handStyle(name)
+-- The game's own weapon flag (UEquipmentData.bIsAWeapon) on what the right hand
+-- holds (the character's PlayerEquipmentComponent), for weapons the prefixes miss.
+local function holdsWeapon(pc)
+    local ok, isWeapon = pcall(function() return pc.Pawn.PlayerEquipmentComponent:GetHeldEquipmentDataRight().bIsAWeapon end)
+    return ok and isWeapon == true
+end
+
+local function handStyle(name, pc)
     if name == "" or name:find("ITEM_Torch", 1, true) == 1 then return "free" end
     if toolFamilyOf(name) then return "tool" end
     for _, prefix in ipairs(MELEE_PREFIXES) do
         if name:find(prefix, 1, true) == 1 then return "weapon" end
     end
+    if pc and holdsWeapon(pc) then return "weapon" end
     return nil
 end
 
@@ -1352,7 +1387,7 @@ local function handleAttackClick(now)
     local pc, pawn = localPawn()
     if not pc or menuOpen(pc) then return end
     local held = heldItemName(pc)
-    local style = handStyle(held)
+    local style = handStyle(held, pc)
     if not style or (style == "weapon" and not cfg.AutoToolFromWeapon) then return end
     local target, kind = clickTarget(pc, pawn, now, style == "weapon")
     if not target then return end
@@ -1606,7 +1641,11 @@ pcall(RegisterHook, "/Script/Engine.PlayerController:ClientMessage", function(ct
 end)
 
 -- Server side: a waiting player's "hi". Answer now if that player is done, else check them now.
-pcall(RegisterHook, "/Script/Engine.PlayerController:ServerExec", function(ctx, message)
+-- The player calls ServerExec, the console wrapper that sends the ServerExecRPC
+-- RPC; the server receives ServerExecRPC (engine headers), so that is hooked.
+-- (Before 2.3.6 only ServerExec was hooked, which never fires on the server; the
+-- server's own 5 s scan of players covered for it.)
+local function onHi(ctx, message)
     local text = textOf(message)
     if text ~= PROTO .. " hi" then return end
     local pc = ctx:get()
@@ -1620,7 +1659,9 @@ pcall(RegisterHook, "/Script/Engine.PlayerController:ServerExec", function(ctx, 
     elseif st then
         st.nextCheck = 0
     end
-end)
+end
+pcall(RegisterHook, "/Script/Engine.PlayerController:ServerExecRPC", onHi)
+pcall(RegisterHook, "/Script/Engine.PlayerController:ServerExec", onHi)
 pcall(RegisterInitGameStatePostHook, function()
     -- Game modes only exist on the server; serverTick then tells a host (other players can
     -- join) from a standalone world (nobody else, the local path is enough).

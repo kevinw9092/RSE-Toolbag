@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.3.6
+Checked against the game's header dump (CL-240163), so names that were guessed are now the game's own.
+- **Server handshake fixed.** A joining player's "I'm waiting" message was sent with ServerExec, but the server receives it as ServerExecRPC. The old hook never fired, and the server's own 5 s check of players covered for it. Both are now hooked, so the server answers at once.
+- **Ore nodes** are found near you, not only when aimed at: they are their own class (AOreNode), not a destructible like rocks.
+- **Kebbit burrows** ask the game whether they are already found (IsKebbitBurrowFound). An opened burrow no longer asks for the spade.
+- **Durability** comes from the item's own GetDurability and GetMaxDurability (per item, so upgrades count), and IsUnbreakable. The old reads stay as the fallback.
+- **Weapons:** the game's own weapon flag on the held item backs up the list of weapon names for auto tool.
+- **HUD fields:**
+  - The toolbag row finds the HUD, the inventory panel's frame, its content and the quick access bar through the game's own fields, falling back to the old searches.
+  - The prompt reads the key icon's border directly.
+- **Inventory growth:** if the inventory ever had fewer slots than the toolbag needs, the toolbag no longer turned off. SetMaxSlotCount is not a reflected function, so MaxSlotCount is now raised directly. Normally the slots are already there from the template.
+
 ## 2.3.5
 - **Fixed: the spade never came out for dead plants (2.3.3).** It read a stage field that farm plots don't have; the game keeps a plot's stage where mods can't read it (found in the game's header dump). A dead plant is now recognised by the mesh it shows: each plant stage's "dead" look, gathered once from the game's plant data.
 - **Fewer hitches:**

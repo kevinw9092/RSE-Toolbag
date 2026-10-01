@@ -103,8 +103,12 @@ local function text(tree, px, color)
 end
 
 -- ------------------------------------------------------------------ the HUD
-local function hudRoot()
-    local w = get(function() return FindFirstOf('WBP_HUD_RootWidget_C') end)
+-- The in-world HUD: the player HUD's HUDWidgetAlwaysActive (APlayerHUD in the
+-- game's header dump), else the first HUD root widget found (an object search).
+local function hudRoot(pc)
+    local w = pc and get(function() return pc.MyHUD.HUDWidgetAlwaysActive end)
+    if valid(w) then return w end
+    w = get(function() return FindFirstOf('WBP_HUD_RootWidget_C') end)
     if valid(w) and not nameOf(w):find('^Default__') then return w end
     return nil
 end
@@ -360,23 +364,41 @@ local function childNamed(parent, wanted)
     return nil
 end
 
-local function placeOverActionBar(host)
-    local panel = nil
-    for _, p in ipairs(get(function() return FindAllOf('WBP_Inventory_MainPanel_C') end) or {}) do
-        local full = valid(p) and (get(function() return p:GetFullName() end) or '') or ''
-        if full ~= '' and not full:find('Default__', 1, true) and full:find('Transient', 1, true) then panel = p break end
+-- The live inventory panel: RSE-Dock's (by path), else an object search.
+local function inventoryPanel()
+    local okP, path = pcall(function() return ModRef:GetSharedVariable('RSEDock.panel') end)
+    local p = okP and type(path) == 'string' and path ~= '' and get(function() return StaticFindObject(path) end)
+    if valid(p) then return p end
+    for _, c in ipairs(get(function() return FindAllOf('WBP_Inventory_MainPanel_C') end) or {}) do
+        local full = valid(c) and (get(function() return c:GetFullName() end) or '') or ''
+        if full ~= '' and not full:find('Default__', 1, true) and full:find('Transient', 1, true) then return c end
     end
+    return nil
+end
+
+local function placeOverActionBar(host)
+    local panel = inventoryPanel()
     if not panel then return nil, 'inventory panel not found' end
     local canvas = get(function() return panel.WidgetTree.RootWidget end)
-    local frame = valid(canvas) and childNamed(canvas, 'BackgroundPanel')
+    -- The panel's own fields (UHUDPanelWidget.BackgroundPanel, its PanelContent,
+    -- and InventoryContent.QuickAccessBar, from the game's header dump); the
+    -- tree walks are the fallback.
+    local frame = get(function() return panel.BackgroundPanel end)
+    if not valid(frame) then frame = valid(canvas) and childNamed(canvas, 'BackgroundPanel') end
     local slot = frame and get(function() return frame.Slot end)
     local l = valid(slot) and get(function() return slot:GetLayout() end)
     if not l then return nil, 'inventory grid frame not found' end
-    local content = walk(get(function() return frame.WidgetTree.RootWidget end), function(w)
-        if nameOf(w) == 'PanelContent' then return w end
-    end, 0)
+    local content = get(function() return frame.PanelContent end)
+    if not valid(content) then
+        content = walk(get(function() return frame.WidgetTree.RootWidget end), function(w)
+            if nameOf(w) == 'PanelContent' then return w end
+        end, 0)
+    end
     local inset = content and get(function() return content.Slot.Padding.Top end) or 0
-    local bar = walk(content, function(w) if className(w):find('QuickAccesBar', 1, true) then return w end end, 0)
+    local bar = get(function() return panel.InventoryContent.QuickAccessBar end)
+    if not valid(bar) then
+        bar = walk(content, function(w) if className(w):find('QuickAccesBar', 1, true) then return w end end, 0)
+    end
     local barPad = bar and get(function() return bar.Slot.Padding.Top end) or 0
     local o, a = l.Offsets, l.Alignment
     local top = o.Top - (a.Y or 0) * o.Bottom + inset + barPad
@@ -549,7 +571,7 @@ function H.tick(now)
     if not view then
         if now < nextLook then return end
         nextLook = now + 10
-        local ok, result = pcall(build, hudRoot(), pc)
+        local ok, result = pcall(build, hudRoot(pc), pc)
         if not ok then
             failed = true
             T.log('quick row off: ' .. tostring(result))
