@@ -6,7 +6,7 @@
 -- slot index where it was, so no items move on existing characters. The
 -- toolbag window lives in RSE-Dock's shared window beside the inventory.
 local TAG = "[RSE-Toolbag] "
-local VERSION = "2.3.4"
+local VERSION = "2.3.5"
 local MODMENU_ID = "RSE-Toolbag"
 
 local cfg = {
@@ -940,11 +940,15 @@ local function takeOut(slot)
     queueMove(slot, to, displayName(data))
 end
 
+-- Slots locked in RSE-QualityOfLife (its favourite slots, shared as ",3,17,")
+-- are left alone.
 local function storeAll()
     forgetTools()
+    local okL, locked = pcall(function() return ModRef:GetSharedVariable("RSEQoL.locked") end)
+    locked = okL and type(locked) == "string" and locked or ""
     local t = scanTools(lastPc)
     for _, e in ipairs(t.all) do
-        if not e.toolbag then storeTool(e.slot) end
+        if not e.toolbag and not locked:find("," .. e.slot .. ",", 1, true) then storeTool(e.slot) end
     end
 end
 
@@ -1197,29 +1201,36 @@ local function findWorkTarget(pc, pawn, now)
 end
 
 -- What a farm plot needs next; `have` limits it to tools the player carries.
--- The plot's stage (EFarmPlotStage: Idle, Planted, Weeds, Diseased, Dead or
--- Harvestable), or nil if it cannot be read. The stage names are read from the
--- game's enum once.
-local plotStage
+-- Is the plot's plant dead? The game keeps a plot's stage in its farming
+-- subsystem, out of reach of mods (2.3.3 read a PlotStage field the plot does
+-- not have, from the header dump 2026-10-01). A dead plant shows its stage's
+-- Dead mesh (UFarmPlantStageData.Dead.Mesh), so the plot's plant mesh is
+-- compared with those, gathered once from the loaded plant data (as paths).
+local plotIsDead
 do
-    local names, warned = nil, false
-    plotStage = function(slot)
-        if not names then
-            local found = {}
-            pcall(function()
-                StaticFindObject("/Script/Dominion.EFarmPlotStage"):ForEachName(function(n, v)
-                    found[v] = n:ToString():match("([%w_]+)$")
-                end)
-            end)
-            if next(found) then names = found end
+    local deadMeshes, triedAt = nil, -math.huge
+    plotIsDead = function(slot)
+        if not deadMeshes then
+            -- An object search: at most every 30 s until plant data is loaded.
+            if os.clock() - triedAt < 30 then return false end
+            triedAt = os.clock()
+            local found, n = {}, 0
+            local ok, all = pcall(FindAllOf, "FarmPlantStageData")
+            for _, st in ipairs(ok and all or {}) do
+                local okM, mesh = pcall(function() return st.Dead.Mesh end)
+                local p = okM and objectPathOf(mesh) or ""
+                if p ~= "" and not found[p] then found[p] = true n = n + 1 end
+            end
+            if n == 0 then return false end
+            deadMeshes = found
+            debugLog("farm plots: " .. n .. " dead plant meshes known")
         end
-        local ok, v = pcall(function() return slot.PlotStage end)
-        local stage = ok and names and names[tonumber(v) or -1] or nil
-        if not stage and not warned then
-            warned = true
-            debugLog("farm plot: stage not readable (PlotStage " .. tostring(ok and v) .. "); dead plants are not detected")
-        end
-        return stage
+        local okI, ism = pcall(function() return slot.PlantMeshComponent end)
+        if not okI or not isValidObj(ism) then return false end
+        local okN, instances = pcall(function() return ism:GetInstanceCount() end)
+        if not okN or (tonumber(instances) or 0) == 0 then return false end
+        local okM, mesh = pcall(function() return ism.StaticMesh end)
+        return okM and deadMeshes[objectPathOf(mesh)] == true
     end
 end
 
@@ -1228,7 +1239,7 @@ local function plotNeed(actor, have)
     if not slot then return nil end
     if callOn(slot, "GetSoilState") == 0 then return "spade" end
     -- A dead plant is dug out with the spade.
-    if plotStage(slot) == "Dead" then return "spade" end
+    if plotIsDead(slot) then return "spade" end
     if callOn(slot, "CanHarvest") == true or callOn(slot, "CanHealDisease") == true then return nil end
     if callOn(slot, "IsFullyWatered") == false and (not have or have.water) then return "water" end
     if cfg.UseCompost and callOn(slot, "IsFullyFertilized") == false and (not have or have.compost) then return "compost" end
@@ -1705,8 +1716,8 @@ end
 
 -- Fallback when ClientRestart never reaches us: ConsoleEnablerMod unregisters its own ClientRestart
 -- hook at load, and on UE4SS 3.0.x that drops every Lua callback on that function (seen 2026-09-30:
--- the hook was removed and this mod never saw the player). Every 2 s without a player, ask UEHelpers
--- for the local controller; this is a cached lookup, not an object scan.
+-- the hook was removed and this mod never saw the player). Every 10 s without a player, ask UEHelpers
+-- for the local controller. That is an object scan (UEHelpers caches nothing), hence the long gap.
 local UEH = nil
 pcall(function() UEH = require("UEHelpers") end)
 local function findPlayerFallback(now)
@@ -1738,7 +1749,8 @@ local ticks = 0
 local function tick()
     ticks = ticks + 1
     pcall(modMenuSync)
-    if ticks % 20 == 0 then pcall(findPlayerFallback, os.clock()) end
+    -- Every 10 s: UEHelpers.GetPlayerController searches every object (a hitch at the main menu).
+    if ticks % 100 == 0 then pcall(findPlayerFallback, os.clock()) end
     local okSv, errSv = pcall(serverTick, os.clock())
     if not okSv and ticks % 50 == 0 then log("server mode: " .. tostring(errSv)) end
     if not invChecked and isValidObj(lastPc) and ticks % 50 == 0 then pcall(checkInventory) end

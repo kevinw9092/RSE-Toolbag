@@ -119,8 +119,6 @@ local function setText(tb, s, cache, key)
     if pcall(function() tb:SetText(FText(s)) end) and cache then cache[key] = s end
 end
 
-local UEH = nil
-pcall(function() UEH = require('UEHelpers') end)
 -- The game button left-aligns its label (a left padding plus a spacer taking
 -- the rest of the row) and re-applies that inset when it is first drawn.
 -- Centre the label and let the row span the button, as RSE-Transmog does;
@@ -154,7 +152,9 @@ local function gameButton(view, parent, label, action, minW, minH)
     local buttonClass = loadObject(BUTTON_CLASS) -- by path, never cached
     assert(valid(buttonClass), 'game button class missing')
     local library = StaticFindObject('/Script/UMG.Default__WidgetBlueprintLibrary')
-    local b = get(function() return library:Create(UEH and UEH.GetWorld(), buttonClass, T.pc()) end)
+    -- The player controller is the world context: UEHelpers.GetWorld searches
+    -- every object on each call (about 30 buttons per window build).
+    local b = get(function() return library:Create(T.pc(), buttonClass, T.pc()) end)
     assert(valid(b), 'could not create a game button')
     local slot = add(parent, b)
     local width = label ~= '' and fitWidth(label, minW) or (minW or 10)

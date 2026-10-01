@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.3.5
+- **Fixed: the spade never came out for dead plants (2.3.3).** It read a stage field that farm plots don't have; the game keeps a plot's stage where mods can't read it (found in the game's header dump). A dead plant is now recognised by the mesh it shows: each plant stage's "dead" look, gathered once from the game's plant data.
+- **Fewer hitches:**
+  - Building the toolbag window made one full object search per button, through UEHelpers.GetWorld, so opening it after a map load could freeze the game for a second. The buttons now use the player controller directly.
+  - Without a player (at the main menu), the fallback that finds the player searched every 2 s. It now searches every 10 s.
+- **Store all leaves locked slots alone.** Slots you lock in RSE-QualityOfLife (its favourite slots) are skipped.
+
 ## 2.3.4
 - **Breakable walls.** The tool key, the Switch Tool prompt and auto tool take out the pickaxe for the breakable walls (castle, DK, DR and vault walls, and the Fuzan wall), as they do for rocks.
 
